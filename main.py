@@ -9,6 +9,7 @@ from aiogram.enums import ParseMode
 from aiohttp import web
 from app.student_handler import user_router
 from app.admin_handler import admin_router
+from app.super_admin_handler import super_admin_router
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,6 +22,7 @@ logging.basicConfig(level=logging.INFO)
 dispatcher = Dispatcher()
 dispatcher.include_router(user_router)
 dispatcher.include_router(admin_router)
+dispatcher.include_router(super_admin_router)
 
 @dispatcher.message(Command("id"))
 async def get_id(message: Message):

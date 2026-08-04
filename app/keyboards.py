@@ -24,10 +24,10 @@ admin_keyboard = ReplyKeyboardMarkup(keyboard=[
     one_time_keyboard=True
 )
 
-# superadmin_keyboard = ReplyKeyboardMarkup(keyboard=
-#     [[KeyboardButton(text='Добавить админа')],
-#      [KeyboardButton(text='Список текущих админов')]],
-#     resize_keyboard=True,
-#     input_field_placeholder="Выберите действие",
-#     one_time_keyboard=True
-# )
+super_admin_keyboard = ReplyKeyboardMarkup(keyboard=
+    [[KeyboardButton(text='Добавить админа')],
+     [KeyboardButton(text='Список текущих админов')]],
+    resize_keyboard=True,
+    input_field_placeholder="Выберите действие",
+    one_time_keyboard=True
+)
