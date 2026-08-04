@@ -15,3 +15,19 @@ choose_tags = ReplyKeyboardMarkup(keyboard=[
     input_field_placeholder="Выберите тэги",
     one_time_keyboard=True
 )
+
+admin_keyboard = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text='Одобрить')],
+    [KeyboardButton(text='Вернуть на доработку')],
+    [KeyboardButton(text='Удалить')]],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
+
+# superadmin_keyboard = ReplyKeyboardMarkup(keyboard=
+#     [[KeyboardButton(text='Добавить админа')],
+#      [KeyboardButton(text='Список текущих админов')]],
+#     resize_keyboard=True,
+#     input_field_placeholder="Выберите действие",
+#     one_time_keyboard=True
+# )

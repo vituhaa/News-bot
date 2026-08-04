@@ -1,11 +1,14 @@
 import asyncio
 import os
 import logging
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher
+from aiogram.types import Message
 from aiogram.filters.command import Command
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.enums import ParseMode
 from aiohttp import web
-from app.handler import user_router
+from app.student_handler import user_router
+from app.admin_handler import admin_router
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,6 +20,15 @@ logging.basicConfig(level=logging.INFO)
 
 dispatcher = Dispatcher()
 dispatcher.include_router(user_router)
+dispatcher.include_router(admin_router)
+
+@dispatcher.message(Command("id"))
+async def get_id(message: Message):
+    user = message.from_user
+    await message.answer(
+        f"Ваш ID: {user.id}",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 async def healthcheck(request: web.Request):
     return web.Response(text="Bot is alive!")

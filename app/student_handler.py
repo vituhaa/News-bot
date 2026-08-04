@@ -7,6 +7,12 @@ import app.keyboards as keyboards
 
 user_router = Router()
 
+"""
+заглушки для бд: 
+1) статус новости студента (создание новости в бд)
+2) сохранённые данные новости для последующего редактирования - user_news = {}
+"""
+
 class Questions(StatesGroup):
     topic = State()
     text = State()
@@ -15,6 +21,8 @@ class Questions(StatesGroup):
 
 class UserState(StatesGroup):
     wait_for_choice = State()
+
+user_news = {} # удалить потом и заменить на таблицу с новостями
 
 def check_input_type(message: Message) -> tuple[bool, str]:
     allowed = {
@@ -41,16 +49,23 @@ async def start_command(message: Message, state: FSMContext):
     await message.answer("Пункт 1. Название вашей новости:")
     await state.set_state(Questions.topic)
 
+
 @user_router.message(Questions.topic)
 async def type_text(message: Message, state: FSMContext):
     await state.update_data(q1=message.text)
-    await message.answer("Пункт 2. Текст вашей новости:")
-    await state.set_state(Questions.text)
+    if (len(message.text) < 200):
+        await message.answer("Пункт 2. Текст вашей новости:")
+    else:
+        await message.answer("Слишком длинный текст, максимальная длина - 200 символов. Попробуйте снова.")
+        return
+    await state.set_state(Questions.text)   
+
 
 @user_router.message(Questions.text)
 async def type_tags(message: Message, state: FSMContext):
     await message.answer("Пункт 3. Тэг вашей новости:", reply_markup=keyboards.choose_tags)
     await state.set_state(Questions.tags)
+
 
 @user_router.message(Questions.tags)
 async def choose_tags(message: Message, state: FSMContext):
@@ -65,6 +80,7 @@ async def choose_tags(message: Message, state: FSMContext):
         await state.set_state(Questions.file)
     else:
         await message.answer("Пожалуйста, выберите что-то из предложенного списка:", reply_markup=keyboards.choose_tags)
+
 
 @user_router.message(StateFilter(Questions.file), F.document | F.photo)
 async def file_handler(message: Message, state: FSMContext):
@@ -114,19 +130,20 @@ async def file_handler(message: Message, state: FSMContext):
         await message.answer("Новость готова к отправке! Отправить?",
                              reply_markup=keyboards.edit_news)
 
-    # await state.clear()
 
 @user_router.message(UserState.wait_for_choice)
 async def edit_news(message: Message, state: FSMContext):
     if message.text == "Редактировать":
         await state.clear()
         await message.answer("Редактируем...", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Пункт 1. Название вашей новости:")
+        await state.set_state(Questions.topic)
     elif message.text == "Отправить":
         await state.clear()
         await message.answer("Готово! Новость отправлена на валидацию!", reply_markup=ReplyKeyboardRemove())
     else:
         await message.answer("Введите ответ с помощью клавиатуры.", reply_markup=keyboards.edit_news)
 
-@user_router.message()
-async def any_command(message: Message):
-    await message.answer("Неверная команда.")
+# @user_router.message()
+# async def any_command(message: Message):
+#     await message.answer("Неверная команда.")
