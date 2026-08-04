@@ -6,7 +6,9 @@ from aiogram.filters.command import Command
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import web
 from app.handler import user_router
+from dotenv import load_dotenv
 
+load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 PROXY_URL = os.getenv('PROXY_URL')

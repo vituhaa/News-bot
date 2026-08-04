@@ -12,6 +12,23 @@ class Questions(StatesGroup):
     text = State()
     file = State()
 
+def check_input_type(message: Message) -> tuple[bool, str]:
+    allowed = {
+        'document': ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        'photo': ['image/jpg', 'image/png']
+    }
+
+    if message.document:
+        doc_type = message.document.mime_type
+        if doc_type in allowed['document']:
+            return True, ""
+        else:
+            return False, "Неверный ввод! Прикрепите PDF или DOCX файл или прикрепите до 10 фотографий."
+    elif message.photo:
+        return True, ""
+    return False, ""
+
+
 @user_router.message(Command("start"))
 async def start_command(message: Message, state: FSMContext):
     await state.clear()
@@ -58,25 +75,26 @@ async def file_handler(message: Message, state: FSMContext):
         f"Файл: {file_name}"
     )
 
-    if message.document:
-        await message.answer_document(
-            document=file_id,
-            caption=result
-        )
+    is_allowed, output = check_input_type(message)
+    if not is_allowed:
+        await message.answer(output)
+        return
+    else:
+        if message.document:
+            await message.answer_document(
+                document=file_id,
+                caption=result
+            )
 
-    elif message.photo:
-        await message.answer_photo(
-            photo=file_id,
-            caption=result
-        )
-
-    await message("Новость отправлена на валидацию! Хотите создать ещё одну?")
+        elif message.photo:
+            await message.answer_photo(
+                photo=file_id,
+                caption=result
+            )
+    
+        await message.answer("Новость отправлена на валидацию! Хотите создать ещё одну?")
 
     await state.clear()
-
-@user_router.message(StateFilter(Questions.file))
-async def wrong_file(message: Message):
-    await message.answer("Неверный ввод! Прикрепите файл.")
 
 @user_router.message(F.text == '')
 async def make_another_news(message: Message):
@@ -85,9 +103,3 @@ async def make_another_news(message: Message):
 @user_router.message()
 async def any_command(message: Message):
     await message.answer("Неверная команда.")
-
-""" 
-сделать:
-изменить введённые данные
-удалить новость
-"""
