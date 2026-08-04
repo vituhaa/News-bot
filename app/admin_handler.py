@@ -14,6 +14,7 @@ admin_router = Router()
 
 class AdminState(StatesGroup):
     wait_for_choice = State()
+    wait_for_channel_link = State()
 
 def is_admin(user_id: int) -> bool:
     if str(user_id) == ADMIN:
@@ -24,8 +25,6 @@ def is_admin(user_id: int) -> bool:
 @admin_router.message(Command("admin"))
 async def start_admin(message: Message, state: FSMContext):
     user = message.from_user
-    # await state.clear()
-    print("USER ID TYPE:", type(user.id))
     if is_admin(user.id):
         await message.answer("Пришла новость! \n"
                             f"От: ываыва \n"
@@ -38,18 +37,28 @@ async def start_admin(message: Message, state: FSMContext):
     else:
         await message.answer("У вас нет прав администратора.")
         return
+    
 
-# @admin_router.message(AdminState.wait_for_choice)
-# async def confirm_message(message: Message, state: FSMContext):
-#     if message.text == "Одобрить":
-#         await state.clear()
-#         await message.answer("Редактируем...", reply_markup=ReplyKeyboardRemove())
-#         await message.answer("Пункт 1. Название вашей новости:")
-#         await state.set_state(Questions.topic)
-#     elif message.text == "Вернуть на доработку":
-#         await state.clear()
-#         await message.answer("Готово! Новость отправлена на валидацию!", reply_markup=ReplyKeyboardRemove())
-#     else:
-#         await message.answer("Введите ответ с помощью клавиатуры.", reply_markup=keyboards.edit_news)
+@admin_router.message(AdminState.wait_for_choice)
+async def confirm_message(message: Message, state: FSMContext):
+    if message.text == "Одобрить":
+        await state.set_state(AdminState.wait_for_channel_link)
+        await message.answer("Введите ссылку на телеграм-канал, где хотите опубликовать новость:", reply_markup=ReplyKeyboardRemove())
+    elif message.text == "Вернуть на доработку":
+        await state.clear()
+        await message.answer("Отправляем на доработку...", reply_markup=ReplyKeyboardRemove())
+    elif message.text == "Удалить":
+        await state.clear()
+        await message.answer("Новость удалена.", reply_markup=ReplyKeyboardRemove())
 
+
+@admin_router.message(AdminState.wait_for_channel_link) # нужно, чтобы она сохранялась между сессиями (+добавить возможность поменять в любой момент)
+async def process_channel_link(message: Message, state: FSMContext):
+    link = message.text
+    if not link.startswith(("https://t.me/", "@")):
+        await message.answer("Неверный ввод! Попробуйте ввести ссылку или название как в примере. \n"
+                             "Пример: https://t.me/newsbottest100 или @newsbottest100")
+        return
+    await message.answer(f"Новость опубликована в канале: {link}", reply_markup=ReplyKeyboardRemove())
+    await state.clear()
 
