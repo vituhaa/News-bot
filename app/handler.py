@@ -1,5 +1,5 @@
 from aiogram import F, Router
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -10,7 +10,11 @@ user_router = Router()
 class Questions(StatesGroup):
     topic = State()
     text = State()
+    tags = State()
     file = State()
+
+class UserState(StatesGroup):
+    wait_for_choice = State()
 
 def check_input_type(message: Message) -> tuple[bool, str]:
     allowed = {
@@ -33,21 +37,34 @@ def check_input_type(message: Message) -> tuple[bool, str]:
 async def start_command(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Здравствуйте! Я - новостной бот. \n" \
-                         "Для создания новости заполните форму:")
+                         "Для создания новости заполните форму:", reply_markup=ReplyKeyboardRemove())
     await message.answer("Пункт 1. Название вашей новости:")
     await state.set_state(Questions.topic)
 
 @user_router.message(Questions.topic)
-async def start_command(message: Message, state: FSMContext):
+async def type_text(message: Message, state: FSMContext):
     await state.update_data(q1=message.text)
     await message.answer("Пункт 2. Текст вашей новости:")
     await state.set_state(Questions.text)
 
 @user_router.message(Questions.text)
-async def start_command(message: Message, state: FSMContext):
-    await state.update_data(q2=message.text)
-    await message.answer("Пункт 3. Прикрепите файл:")
-    await state.set_state(Questions.file)
+async def type_tags(message: Message, state: FSMContext):
+    await message.answer("Пункт 3. Тэг вашей новости:", reply_markup=keyboards.choose_tags)
+    await state.set_state(Questions.tags)
+
+@user_router.message(Questions.tags)
+async def choose_tags(message: Message, state: FSMContext):
+    allowed = ['Мероприятие', 'Стипендия', 'Спорт', 'Обучение']
+    if message.text in allowed:
+        await state.update_data(q2=message.text)
+        await message.answer("Сохранено!", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+
+        await state.update_data(q3=message.text)
+        await message.answer("Пункт 4. Прикрепите файл:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(Questions.file)
+    else:
+        await message.answer("Пожалуйста, выберите что-то из предложенного списка:", reply_markup=keyboards.choose_tags)
 
 @user_router.message(StateFilter(Questions.file), F.document | F.photo)
 async def file_handler(message: Message, state: FSMContext):
@@ -72,6 +89,7 @@ async def file_handler(message: Message, state: FSMContext):
         "Ваша новость: \n"
         f"Название: {data.get('q1', 'Не указано')} \n"
         f"Текст: {data.get('q2', 'Не указано')} \n"
+        f"Тэги: {data.get('q3', 'Не указано')} \n"
         f"Файл: {file_name}"
     )
 
@@ -91,14 +109,23 @@ async def file_handler(message: Message, state: FSMContext):
                 photo=file_id,
                 caption=result
             )
-    
-        await message.answer("Новость отправлена на валидацию! Хотите создать ещё одну?")
 
-    await state.clear()
+        await state.set_state(UserState.wait_for_choice)
+        await message.answer("Новость готова к отправке! Отправить?",
+                             reply_markup=keyboards.edit_news)
 
-@user_router.message(F.text == '')
-async def make_another_news(message: Message):
-    await message.answer('Выберите ответ:', reply_markup=keyboards.make_another_news)
+    # await state.clear()
+
+@user_router.message(UserState.wait_for_choice)
+async def edit_news(message: Message, state: FSMContext):
+    if message.text == "Редактировать":
+        await state.clear()
+        await message.answer("Редактируем...", reply_markup=ReplyKeyboardRemove())
+    elif message.text == "Отправить":
+        await state.clear()
+        await message.answer("Готово! Новость отправлена на валидацию!", reply_markup=ReplyKeyboardRemove())
+    else:
+        await message.answer("Введите ответ с помощью клавиатуры.", reply_markup=keyboards.edit_news)
 
 @user_router.message()
 async def any_command(message: Message):
