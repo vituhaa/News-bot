@@ -15,7 +15,7 @@ class Storage:
             'channel_username': None,
             'moderation_timeout': 600
         }
-        self._init_default_categories()
+     # self._init_default_categories()  # категории задаются в клавиатуре
 
     # Категории
     def _init_default_categories(self):

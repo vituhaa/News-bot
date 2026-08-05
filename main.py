@@ -2,32 +2,53 @@ import asyncio
 import os
 import logging
 from aiogram import Bot, Dispatcher
+from aiogram.types import Message
+from aiogram.filters.command import Command
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.enums import ParseMode
+from aiohttp import web
+from dotenv import load_dotenv
 
 from app.student_handler import user_router
 from app.admin_handler import admin_router, init_admins
-from app.config import BOT_TOKEN, PROXY_URL
+
+load_dotenv()
+
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+PROXY_URL = os.getenv('PROXY_URL')
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+dispatcher = Dispatcher()
+dispatcher.include_router(user_router)
+dispatcher.include_router(admin_router)
+
+
+@dispatcher.message(Command("id"))
+async def get_id(message: Message):
+    user = message.from_user
+    await message.answer(
+        f"Ваш ID: {user.id}",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+async def healthcheck(request: web.Request):
+    return web.Response(text="Bot is alive!")
 
 
 async def main():
-    init_admins()
-    
-    session = AiohttpSession(proxy=PROXY_URL) if PROXY_URL else None
+    session = AiohttpSession(proxy=PROXY_URL)
     bot = Bot(token=BOT_TOKEN, session=session)
-    
-    dispatcher = Dispatcher()
-    dispatcher.include_router(user_router)
-    dispatcher.include_router(admin_router)
-    
     try:
         bot_info = await bot.get_me()
-        logger.info(f"Бот @{bot_info.username} подключён")
-        
+        print(f"Бот @{bot_info.username} подключён")
+
+        init_admins()
+
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(bot)
+
     finally:
         await bot.session.close()
 

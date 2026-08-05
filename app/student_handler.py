@@ -1,27 +1,29 @@
 from aiogram import F, Router
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from datetime import datetime
+
 import app.keyboards as keyboards
 from app.storage import storage
 from app.models import Post
 
 user_router = Router()
-import logging
-logger = logging.getLogger(__name__)
 
-class CreateNews(StatesGroup):
+# ===== Состояния студента =====
+class Questions(StatesGroup):
     topic = State()
     text = State()
     tags = State()
     file = State()
 
-class UserActions(StatesGroup):
-    wait_for_choice = State() # ожидание выбора отправить/редактировать
+class UserState(StatesGroup):
+    wait_for_choice = State()
 
-def check_file_type(message: Message) -> tuple[bool, str]:
-    """Проверка типа файла"""
+
+# Вспомогательная функция проверки типа файла
+def check_input_type(message: Message) -> tuple[bool, str]:
     allowed = {
         'document': ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
         'photo': ['image/jpg', 'image/png']
@@ -34,209 +36,179 @@ def check_file_type(message: Message) -> tuple[bool, str]:
             return False, "Неверный ввод! Прикрепите PDF или DOCX файл или прикрепите до 10 фотографий."
     elif message.photo:
         return True, ""
-    return False, "Пожалуйста, прикрепите фото или документ."
+    return False, ""
 
-# Уведомляет всех администраторов о новой новости
-async def notify_admins_about_new_post(post: Post):
-    admins = storage.get_all_admins()
-    
-    if not admins:
-        logger.warning("Нет администраторов для уведомления")
-        return
-    
-    from aiogram import Bot
-    from app.config import BOT_TOKEN
-    
-    bot = Bot(token=BOT_TOKEN)
-    
-    text = (
-        "НОВАЯ НОВОСТЬ\n"
-        "=" * 30 + "\n"
-        f"Автор: @{post.username}\n"
-        f"Заголовок: {post.topic}\n"
-        f"Категория: {post.category or 'Без категории'}\n"
-        f"ID: #{post.id}\n\n"
-        "Для обработки используйте /admin"
-    )
-    
-    for admin in admins:
-        try:
-            await bot.send_message(
-                chat_id=admin.user_id,
-                text=text
-            )
-            logger.info(f"Уведомление отправлено админу {admin.user_id}")
-        except Exception as e:
-            logger.error(f"Не удалось отправить уведомление админу {admin.user_id}: {e}")
-    
-    await bot.session.close()
+
+# ===== Обработчики =====
 
 @user_router.message(Command("start"))
 async def start_command(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("Здравствуйте! Я - новостной бот. \n" \
-                         "Для создания новости заполните форму:", reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        "Здравствуйте! Я - новостной бот.\n"
+        "Для создания новости заполните форму:",
+        reply_markup=ReplyKeyboardRemove()
+    )
     await message.answer("Пункт 1. Название вашей новости (до 200 символов):")
-    await state.set_state(CreateNews.topic)
+    await state.set_state(Questions.topic)
 
-@user_router.message(CreateNews.topic)
-async def process_topic(message: Message, state: FSMContext):
-    await state.update_data(q1=message.text)
-    if (len(message.text) < 200):
-        await message.answer("Пункт 2. Текст вашей новости:")
-    else:
+
+@user_router.message(Questions.topic)
+async def type_text(message: Message, state: FSMContext):
+    if len(message.text) > 200:
         await message.answer("Слишком длинный текст, максимальная длина - 200 символов. Попробуйте снова.")
         return
-    await state.set_state(CreateNews.text)   
+    await state.update_data(topic=message.text)
+    await message.answer("Пункт 2. Текст вашей новости:")
+    await state.set_state(Questions.text)
 
-@user_router.message(CreateNews.text)
-async def process_text(message: Message, state: FSMContext):
+
+@user_router.message(Questions.text)
+async def type_tags(message: Message, state: FSMContext):
+    await state.update_data(text=message.text)
     await message.answer(
-        "Пункт 3. Тэг вашей новости:",
-        reply_markup=keyboards.choose_tags
+        "Пункт 3. Выберите категорию новости:",
+        reply_markup=keyboards.category_keyboard
     )
-    await state.set_state(CreateNews.tags)
+    await state.set_state(Questions.tags)
 
-@user_router.message(CreateNews.tags)
-async def process_tags(message: Message, state: FSMContext):
+
+@user_router.message(Questions.tags)
+async def choose_tags(message: Message, state: FSMContext):
     allowed = ['Мероприятие', 'Стипендия', 'Спорт', 'Обучение']
-    
-    if message.text in allowed:
-        await state.update_data(category=message.text)
+    if message.text not in allowed:
         await message.answer(
-            "Сохранено!",
-            reply_markup=ReplyKeyboardRemove()
+            "Пожалуйста, выберите категорию из предложенных кнопок:",
+            reply_markup=keyboards.category_keyboard
         )
-        await message.answer(
-            "Пункт 4. Прикрепите файл:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        await state.set_state(CreateNews.file)
-    else:
-        await message.answer("Пожалуйста, выберите что-то из предложенного списка:", reply_markup=keyboards.choose_tags)
+        return
+    await state.update_data(category=message.text)
+    await message.answer(
+        "Пункт 4. Прикрепите файл (фото JPG/PNG или документ PDF/DOCX):",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(Questions.file)
 
-@user_router.message(StateFilter(CreateNews.file), F.document | F.photo)
-async def process_file(message: Message, state: FSMContext):
-    file_id = None
-    file_name = None
-    file_type = None
-    
+
+@user_router.message(StateFilter(Questions.file), F.document | F.photo)
+async def file_handler(message: Message, state: FSMContext):
+    # Проверяем допустимость файла
+    is_allowed, error_msg = check_input_type(message)
+    if not is_allowed:
+        await message.answer(error_msg)
+        return
+
+    # Сохраняем информацию о файле
     if message.document:
         file_id = message.document.file_id
-        file_name = message.document.file_name
-        file_type = 'document'
+        file_name = message.document.file_name or "Документ"
+        file_type = "document"
     elif message.photo:
         file_id = message.photo[-1].file_id
         file_name = "Фото"
-        file_type = 'photo'
-
-    # Проверяем тип файла
-    is_allowed, output = check_file_type(message)
-    if not is_allowed:
-        await message.answer(output)
+        file_type = "photo"
+    else:
         return
-    
+
     await state.update_data(
         file_id=file_id,
         file_name=file_name,
         file_type=file_type
     )
 
+    # Получаем все данные
     data = await state.get_data()
+    topic = data.get('topic', 'Не указано')
+    text = data.get('text', 'Не указано')
+    category = data.get('category', 'Не указано')
 
+    # Формируем карточку для предпросмотра
     result = (
         "Ваша новость:\n"
-        f"Название: {data.get('topic', 'Не указано')}\n"
-        f"Текст: {data.get('text', 'Не указано')}\n"
-        f"Тэги: {data.get('category', 'Не указано')}\n"
+        f"Название: {topic}\n"
+        f"Текст: {text}\n"
+        f"Категория: {category}\n"
         f"Файл: {file_name}"
     )
 
-    if message.document:
+    # Отправляем предпросмотр с файлом
+    if file_type == "document":
         await message.answer_document(
             document=file_id,
             caption=result
         )
-    elif message.photo:
+    else:  # photo
         await message.answer_photo(
             photo=file_id,
             caption=result
         )
 
-    await state.set_state(UserActions.wait_for_choice)
+    # Переходим к выбору действия
+    await state.set_state(UserState.wait_for_choice)
     await message.answer(
         "Новость готова к отправке! Отправить?",
-        reply_markup=keyboards.edit_news
+        reply_markup=keyboards.edit_news_keyboard
     )
 
-@user_router.message(StateFilter(CreateNews.file))
-async def wrong_file(message: Message):
-    await message.answer(
-        "Неверный ввод! Прикрепите файл."
-    )
 
-@user_router.message(UserActions.wait_for_choice)
-async def handle_choice(message: Message, state: FSMContext):
+@user_router.message(UserState.wait_for_choice)
+async def edit_or_submit(message: Message, state: FSMContext):
     if message.text == "Редактировать":
-        await state.clear()
-        await message.answer(
-            "Редактируем...",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        await message.answer("Пункт 1. Название вашей новости:")
-        await state.set_state(CreateNews.topic)
-        
-    elif message.text == "Отправить":
+        # Возвращаем к первому шагу с сохранёнными данными
         data = await state.get_data()
-        
-        # Создаём пост в хранилище
+        await state.clear()
+        # Сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
+        await state.update_data(data)
+        await message.answer("Редактируем... Начните с названия.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Пункт 1. Название вашей новости (до 200 символов):")
+        await state.set_state(Questions.topic)
+
+    elif message.text == "Отправить":
+        # Получаем данные
+        data = await state.get_data()
+        topic = data.get('topic')
+        text = data.get('text')
+        category = data.get('category')
+        file_id = data.get('file_id')
+        file_name = data.get('file_name')
+        file_type = data.get('file_type')
+
+        if not all([topic, text, category, file_id]):
+            await message.answer("Ошибка: не все данные заполнены. Начните заново /start")
+            await state.clear()
+            return
+
+        # Создаём объект Post
         post = Post(
             user_id=message.from_user.id,
-            username=message.from_user.username or message.from_user.first_name,
-            topic=data.get('topic'),
-            text=data.get('text'),
-            category=data.get('category'),
-            media_ids=[data.get('file_id')] if data.get('file_id') else [],
-            media_types=[data.get('file_type')] if data.get('file_type') else [],
-            media_names=[data.get('file_name')] if data.get('file_name') else []
+            username=message.from_user.username or f"id_{message.from_user.id}",
+            topic=topic,
+            text=text,
+            category=category,
+            media_ids=[file_id],
+            media_types=[file_type],
+            media_names=[file_name]
         )
-        post.status = 'pending'
-        storage.create_post(post)
-        
-        logger.info(f"Новый пост #{post.id} от @{post.username}: {post.topic}")
-        
+        # Сохраняем в хранилище
+        saved_post = storage.create_post(post)
+
+        # Очищаем состояние
         await state.clear()
         await message.answer(
-            "Готово! Новость отправлена на валидацию! Хотите создать ещё одну?",
-            reply_markup=keyboards.make_another_news
-        )
-        
-        # Уведомляем администраторов
-        await notify_admins_about_new_post(post)
-        
-    else:
-        await message.answer(
-            "Введите ответ с помощью клавиатуры.",
-            reply_markup=keyboards.edit_news
-        )
-
-@user_router.message(F.text.in_(["Да", "Нет"]))
-async def handle_another_news(message: Message, state: FSMContext):
-    if message.text == "Да":
-        await message.answer(
-            "Отлично! Давайте создадим ещё одну новость.",
+            f"Готово! Новость отправлена на валидацию (ID #{saved_post.id}).",
             reply_markup=ReplyKeyboardRemove()
         )
-        await start_command(message, state)
+
+        # TODO: уведомить администраторов (можно реализовать позже)
+
     else:
         await message.answer(
-            "Спасибо! Ваша новость отправлена на проверку.",
-            reply_markup=ReplyKeyboardRemove()
+            "Используйте кнопки клавиатуры.",
+            reply_markup=keyboards.edit_news_keyboard
         )
-        await state.clear()
 
+
+# Обработчик всех остальных сообщений
 @user_router.message()
 async def any_command(message: Message):
-    await message.answer(
-        "Неверная команда. Используйте /start для создания новости."
-    )
+    await message.answer("Неверная команда. Используйте /start для создания новости.")
