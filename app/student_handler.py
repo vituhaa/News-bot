@@ -1,5 +1,5 @@
 from aiogram import F, Router
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -17,7 +17,6 @@ class Questions(StatesGroup):
     text = State()
     tags = State()
     files = State()
-    file = State()
 
 class UserState(StatesGroup):
     wait_for_choice = State()
@@ -82,73 +81,85 @@ async def choose_tags(message: Message, state: FSMContext):
     await state.update_data(category=message.text)
     await message.answer(
         "Пункт 4. Прикрепите файл (до 10 фото JPG/PNG в одном альбому или максимум 1 документ PDF/DOCX):",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=keyboards.done_keyboard
     )
     await state.set_state(Questions.files)
 
 
-@user_router.message(F.media_group_id, StateFilter(Questions.files))
+@user_router.message(F.photo, ~F.media_group_id, StateFilter(Questions.files))
+async def single_photo_handler(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+    if len(photos) >= 10:
+        await message.answer("Нельзя отправлять более 10 фотографий!", reply_markup=keyboards.done_keyboard)
+        return
+
+    photos.append(message.photo[-1].file_id)
+
+    await state.update_data(photos=photos)
+    await message.answer("Фотографии приняты!", reply_markup=keyboards.done_keyboard)
+
+
+@user_router.message(F.photo, F.media_group_id, StateFilter(Questions.files))
 @media_group_handler
 async def album_handler(messages: list[Message], state: FSMContext):
-    photos = [x for x in messages if x.photo]
-    print("PHOTOS = ", len(photos))
+    photos = [x.photo[-1].file_id for x in messages if x.photo]
     data = await state.get_data()
-    # print("DATA = ", data)
-    received = data.get("photos_count", 0)
-    print("RECEIVED = ", received)
+    received = data.get("photos", 0)
     diff = 10 - received
-    print("DIFF = ", diff)
+
     if diff < 0:
-        await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.")
+        await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.",
+                                 reply_markup=keyboards.done_keyboard)
         return
     
     accepted_photos = photos[:diff]
-    print("ACCEPTED = ", len(accepted_photos))
 
     # if len(photos) > diff:
     #     await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.")
 
     await state.update_data(
-        photos_count=received + len(accepted_photos)
+        photos=received + len(accepted_photos)
     )
 
     if accepted_photos:
         builder = MediaGroupBuilder(caption=f"Ваш альбом из {received + len(accepted_photos)} фотографий готов! Если вы прикрепляли более 10 фотографий, \n"
                                     "были выбраны только первых 10 из-за условий новостного бота.")
-        for photo in accepted_photos:
-            builder.add_photo(media=photo.photo[-1].file_id)
+        for file_id in accepted_photos:
+            builder.add_photo(media=file_id)
         
         await messages[0].answer_media_group(builder.build())
-    # await state.set_state(Questions.file)
-    
 
-@user_router.message(StateFilter(Questions.file), F.document | F.photo)
-async def file_handler(message: Message, state: FSMContext):
-    is_allowed, error_msg = check_input_type(message)
-    if not is_allowed:
-        await message.answer(error_msg)
-        return
-    
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        file_name = "Фото"
-        file_type = "photo"
 
-    elif message.document:
-        file_id = message.document.file_id
-        file_name = message.document.file_name or "Документ"
-        file_type = "document"
-        
-    else:
-        return
-
-    await state.update_data(
-        file_id=file_id,
-        file_name=file_name,
-        file_type=file_type
-    )
-
+@user_router.message(F.document, StateFilter(Questions.files))
+async def single_file_handler(message: Message, state: FSMContext):
     data = await state.get_data()
+
+    if data.get("document") is not None:
+        await message.answer("Можно прикрепить только один документ формата PDF или DOCX.", reply_markup=keyboards.done_keyboard)
+        return
+
+    document = {
+        "file_id": message.document.file_id,
+        "file_name": message.document.file_name,
+        "file_type": message.document.mime_type
+        }
+
+    await state.update_data(document=document)
+
+    await message.answer("Документ принят!", reply_markup=keyboards.done_keyboard)
+
+
+@user_router.message(F.text == "Готово", StateFilter(Questions.files))
+async def files_done(message: Message, state: FSMContext):
+    data = await state.get_data()
+
+    photos = data.get("photos", [])
+    document = data.get("document")
+    if not photos and not document:
+        await message.answer("Прикрепите файлы.", reply_markup=keyboards.done_keyboard)
+        return
+    
     topic = data.get('topic', 'Не указано')
     text = data.get('text', 'Не указано')
     category = data.get('category', 'Не указано')
@@ -159,19 +170,11 @@ async def file_handler(message: Message, state: FSMContext):
         f"Название: {topic}\n"
         f"Текст: {text}\n"
         f"Категория: {category}\n"
-        f"Файл: {file_name}"
+        f"Фотографии: {photos if photos else 0} шт.\n"
+        f"Файл: {document['file_name'] if document else 'Нет'}"
     )
 
-    if file_type == "document":
-        await message.answer_document(
-            document=file_id,
-            caption=result
-        )
-    elif file_type == "photo":
-        await message.answer_photo(
-            photo=file_id,
-            caption=result
-        )
+    await message.answer(result)
 
     await state.set_state(UserState.wait_for_choice)
     await message.answer(

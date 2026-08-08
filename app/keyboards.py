@@ -26,6 +26,12 @@ category_keyboard = ReplyKeyboardMarkup(keyboard=[
     one_time_keyboard=True
 )
 
+done_keyboard = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text='Готово')]],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
+
 # ========== КЛАВИАТУРА АДМИНИСТРАТОРА ==========
 
 # Основная панель
