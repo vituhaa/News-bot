@@ -51,22 +51,30 @@ async def start_command(message: Message, state: FSMContext):
 
 @user_router.message(Questions.topic)
 async def type_text(message: Message, state: FSMContext):
-    if len(message.text) > 200:
-        await message.answer("Слишком длинный текст, максимальная длина - 200 символов. Попробуйте снова.")
+    if message.content_type == "text":
+        if len(message.text) > 200:
+            await message.answer("Слишком длинный текст, максимальная длина - 200 символов. Попробуйте снова.")
+            return
+        await state.update_data(topic=message.text)
+        await message.answer("Пункт 2. Текст вашей новости:")
+        await state.set_state(Questions.text)
+    else:
+        await message.answer("Неверный ввод! Дайте текстовое название вашей новости.")
         return
-    await state.update_data(topic=message.text)
-    await message.answer("Пункт 2. Текст вашей новости:")
-    await state.set_state(Questions.text)
 
 
 @user_router.message(Questions.text)
 async def type_tags(message: Message, state: FSMContext):
-    await state.update_data(text=message.text)
-    await message.answer(
-        "Пункт 3. Выберите категорию новости:",
-        reply_markup=keyboards.category_keyboard
-    )
-    await state.set_state(Questions.tags)
+    if message.content_type == "text":
+        await state.update_data(text=message.text)
+        await message.answer(
+            "Пункт 3. Выберите категорию новости:",
+            reply_markup=keyboards.category_keyboard
+        )
+        await state.set_state(Questions.tags)
+    else:
+        await message.answer("Неверный ввод! Дайте текстовое название вашей новости.")
+        return
 
 
 @user_router.message(Questions.tags)
@@ -115,16 +123,18 @@ async def album_handler(messages: list[Message], state: FSMContext):
     
     accepted_photos = photos[:diff]
 
-    # if len(photos) > diff:
-    #     await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.")
+    # для случая, когда мы добавляем сверху ещё несколько фото
+    if len(photos) > diff:
+        await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.")
 
     await state.update_data(
         photos=received + len(accepted_photos)
     )
 
     if accepted_photos:
-        builder = MediaGroupBuilder(caption=f"Ваш альбом из {received + len(accepted_photos)} фотографий готов! Если вы прикрепляли более 10 фотографий, \n"
-                                    "были выбраны только первых 10 из-за условий новостного бота.")
+        builder = MediaGroupBuilder(caption=f"Ваш альбом из {received + len(accepted_photos)} фотографий готов! \n"
+                                    "При выборе более 10 фотографий выбираются \n"
+                                    "только первые 10 из-за условий новостного бота.")
         for file_id in accepted_photos:
             builder.add_photo(media=file_id)
         
@@ -135,19 +145,24 @@ async def album_handler(messages: list[Message], state: FSMContext):
 async def single_file_handler(message: Message, state: FSMContext):
     data = await state.get_data()
 
-    if data.get("document") is not None:
-        await message.answer("Можно прикрепить только один документ формата PDF или DOCX.", reply_markup=keyboards.done_keyboard)
+    is_allowed, output = check_input_type(message)
+    if not is_allowed:
+        await message.answer(output)
         return
+    else:
+        if data.get("document") is not None:
+            await message.answer("Можно прикрепить только один документ формата PDF или DOCX.", reply_markup=keyboards.done_keyboard)
+            return
 
-    document = {
-        "file_id": message.document.file_id,
-        "file_name": message.document.file_name,
-        "file_type": message.document.mime_type
-        }
+        document = {
+            "file_id": message.document.file_id,
+            "file_name": message.document.file_name,
+            "file_type": message.document.mime_type
+            }
 
-    await state.update_data(document=document)
+        await state.update_data(document=document)
 
-    await message.answer("Документ принят!", reply_markup=keyboards.done_keyboard)
+        await message.answer("Документ принят!", reply_markup=keyboards.done_keyboard)
 
 
 @user_router.message(F.text == "Готово", StateFilter(Questions.files))
@@ -242,6 +257,6 @@ async def edit_or_submit(message: Message, state: FSMContext):
         )
 
 
-# @user_router.message()
-# async def any_command(message: Message):
-#     await message.answer("Неизвестная команда.")
+@user_router.message()
+async def any_command(message: Message):
+    await message.answer("Неизвестная команда. Следуйте инструкциям, описанным в сообщениях бота.")
