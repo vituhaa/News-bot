@@ -1,4 +1,3 @@
-import os
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -7,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from datetime import datetime
 import logging
 import json
+import os
 from io import BytesIO
 
 from app.storage import storage
@@ -16,13 +16,10 @@ import app.keyboards as keyboards
 admin_router = Router()
 logger = logging.getLogger(__name__)
 
-# Список суперадминов 
-SUPER_ADMINS = [
-    # @reeywert,
-    # @vituuha,
-    # @azaa_art,
-
-]
+ADMINS = os.getenv("ADMINS")
+SUPER_ADMINS = os.getenv("SUPER_ADMINS")
+admins_list = ADMINS.split(',') if ADMINS else []
+super_admins_list = SUPER_ADMINS.split(',') if SUPER_ADMINS else []
 
 class AdminState(StatesGroup):
     wait_for_choice = State()
@@ -31,12 +28,12 @@ class AdminState(StatesGroup):
     wait_for_user_id = State()
 
 def is_admin(user_id: int) -> bool:
-    return storage.is_admin(user_id) or user_id in SUPER_ADMINS
+    return storage.is_admin(user_id) or (str(user_id) in admins_list)
 
 def is_superadmin(user_id: int) -> bool:
-    return storage.is_superadmin(user_id) or user_id in SUPER_ADMINS
+    return storage.is_superadmin(user_id) or (str(user_id) in super_admins_list)
 
-def init_admins():
+def init_admins(SUPER_ADMINS):
     for admin_id in SUPER_ADMINS:
         if not storage.get_admin(admin_id):
             admin = Admin(
@@ -49,7 +46,6 @@ def init_admins():
             logger.info(f"Суперадмин {admin_id} инициализирован")
 
 # =========== АДМИН ===========
-#Главная панель 
 @admin_router.message(Command("admin"))
 async def start_admin(message: Message, state: FSMContext):
     user = message.from_user
@@ -74,7 +70,6 @@ async def start_admin(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=keyboard)
 
 # =========== ТОЛЬКО ДЛЯ СУПЕРАДМИНА ===========
-# Панель для суперадминистратора
 @admin_router.message(Command("super"))
 async def start_super_admin(message: Message, state: FSMContext):
     user = message.from_user

@@ -1,9 +1,10 @@
 from aiogram import F, Router
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from datetime import datetime
+from aiogram.utils.media_group import MediaGroupBuilder
+from aiogram_media_group import media_group_handler
 
 import app.keyboards as keyboards
 from app.storage import storage
@@ -11,18 +12,16 @@ from app.models import Post
 
 user_router = Router()
 
-# ===== Состояния студента =====
 class Questions(StatesGroup):
     topic = State()
     text = State()
     tags = State()
+    files = State()
     file = State()
 
 class UserState(StatesGroup):
     wait_for_choice = State()
 
-
-# Вспомогательная функция проверки типа файла
 def check_input_type(message: Message) -> tuple[bool, str]:
     allowed = {
         'document': ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
@@ -38,8 +37,6 @@ def check_input_type(message: Message) -> tuple[bool, str]:
         return True, ""
     return False, ""
 
-
-# ===== Обработчики =====
 
 @user_router.message(Command("start"))
 async def start_command(message: Message, state: FSMContext):
@@ -84,29 +81,64 @@ async def choose_tags(message: Message, state: FSMContext):
         return
     await state.update_data(category=message.text)
     await message.answer(
-        "Пункт 4. Прикрепите файл (фото JPG/PNG или документ PDF/DOCX):",
+        "Пункт 4. Прикрепите файл (до 10 фото JPG/PNG в одном альбому или максимум 1 документ PDF/DOCX):",
         reply_markup=ReplyKeyboardRemove()
     )
-    await state.set_state(Questions.file)
+    await state.set_state(Questions.files)
 
+
+@user_router.message(F.media_group_id, StateFilter(Questions.files))
+@media_group_handler
+async def album_handler(messages: list[Message], state: FSMContext):
+    photos = [x for x in messages if x.photo]
+    print("PHOTOS = ", len(photos))
+    data = await state.get_data()
+    # print("DATA = ", data)
+    received = data.get("photos_count", 0)
+    print("RECEIVED = ", received)
+    diff = 10 - received
+    print("DIFF = ", diff)
+    if diff < 0:
+        await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.")
+        return
+    
+    accepted_photos = photos[:diff]
+    print("ACCEPTED = ", len(accepted_photos))
+
+    # if len(photos) > diff:
+    #     await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.")
+
+    await state.update_data(
+        photos_count=received + len(accepted_photos)
+    )
+
+    if accepted_photos:
+        builder = MediaGroupBuilder(caption=f"Ваш альбом из {received + len(accepted_photos)} фотографий готов! Если вы прикрепляли более 10 фотографий, \n"
+                                    "были выбраны только первых 10 из-за условий новостного бота.")
+        for photo in accepted_photos:
+            builder.add_photo(media=photo.photo[-1].file_id)
+        
+        await messages[0].answer_media_group(builder.build())
+    # await state.set_state(Questions.file)
+    
 
 @user_router.message(StateFilter(Questions.file), F.document | F.photo)
 async def file_handler(message: Message, state: FSMContext):
-    # Проверяем допустимость файла
     is_allowed, error_msg = check_input_type(message)
     if not is_allowed:
         await message.answer(error_msg)
         return
-
-    # Сохраняем информацию о файле
-    if message.document:
-        file_id = message.document.file_id
-        file_name = message.document.file_name or "Документ"
-        file_type = "document"
-    elif message.photo:
+    
+    if message.photo:
         file_id = message.photo[-1].file_id
         file_name = "Фото"
         file_type = "photo"
+
+    elif message.document:
+        file_id = message.document.file_id
+        file_name = message.document.file_name or "Документ"
+        file_type = "document"
+        
     else:
         return
 
@@ -116,13 +148,12 @@ async def file_handler(message: Message, state: FSMContext):
         file_type=file_type
     )
 
-    # Получаем все данные
     data = await state.get_data()
     topic = data.get('topic', 'Не указано')
     text = data.get('text', 'Не указано')
     category = data.get('category', 'Не указано')
 
-    # Формируем карточку для предпросмотра
+    # карточка для предпросмотра
     result = (
         "Ваша новость:\n"
         f"Название: {topic}\n"
@@ -131,19 +162,17 @@ async def file_handler(message: Message, state: FSMContext):
         f"Файл: {file_name}"
     )
 
-    # Отправляем предпросмотр с файлом
     if file_type == "document":
         await message.answer_document(
             document=file_id,
             caption=result
         )
-    else:  # photo
+    elif file_type == "photo":
         await message.answer_photo(
             photo=file_id,
             caption=result
         )
 
-    # Переходим к выбору действия
     await state.set_state(UserState.wait_for_choice)
     await message.answer(
         "Новость готова к отправке! Отправить?",
@@ -154,10 +183,12 @@ async def file_handler(message: Message, state: FSMContext):
 @user_router.message(UserState.wait_for_choice)
 async def edit_or_submit(message: Message, state: FSMContext):
     if message.text == "Редактировать":
-        # Возвращаем к первому шагу с сохранёнными данными
+
+        # возвращаемся к первому шагу с сохранёнными данными
         data = await state.get_data()
         await state.clear()
-        # Сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
+
+        # сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
         await state.update_data(data)
         await message.answer("Редактируем... Начните с названия.", reply_markup=ReplyKeyboardRemove())
         await message.answer("Пункт 1. Название вашей новости (до 200 символов):")
@@ -208,7 +239,6 @@ async def edit_or_submit(message: Message, state: FSMContext):
         )
 
 
-# Обработчик всех остальных сообщений
-@user_router.message()
-async def any_command(message: Message):
-    await message.answer("Неверная команда. Используйте /start для создания новости.")
+# @user_router.message()
+# async def any_command(message: Message):
+#     await message.answer("Неизвестная команда.")
