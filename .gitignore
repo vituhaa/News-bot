@@ -6,6 +6,7 @@ __pycache__/
 *$py.class
 
 .vscode/
+.vs/
 .idea/
 *.swp
 *.swo

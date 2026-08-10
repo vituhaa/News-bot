@@ -88,7 +88,8 @@ async def choose_tags(message: Message, state: FSMContext):
         return
     await state.update_data(category=message.text)
     await message.answer(
-        "Пункт 4. Прикрепите файл (до 10 фото JPG/PNG в одном альбому или максимум 1 документ PDF/DOCX):",
+        "Пункт 4. Прикрепите файл. \n"
+        "Можно прикрепить до 10 фото JPG/PNG в одном альбоме или 1 документ формата PDF или DOCX):",
         reply_markup=keyboards.done_keyboard
     )
     await state.set_state(Questions.files)
@@ -113,56 +114,55 @@ async def single_photo_handler(message: Message, state: FSMContext):
 async def album_handler(messages: list[Message], state: FSMContext):
     photos = [x.photo[-1].file_id for x in messages if x.photo]
     data = await state.get_data()
-    received = data.get("photos", 0)
-    diff = 10 - received
+    received = data.get("photos", [])
+    diff = 10 - len(received)
 
-    if diff < 0:
-        await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.",
+    if diff <= 0:
+        await messages[0].answer("Нельзя отправлять более 10 фотографий! Остальные прикреплённые фотографии были удалены.",
                                  reply_markup=keyboards.done_keyboard)
         return
     
     accepted_photos = photos[:diff]
 
-    # для случая, когда мы добавляем сверху ещё несколько фото
-    if len(photos) > diff:
-        await messages[0].answer("Нельзя отправлять более 10 фотографий! Будут приняты первые 10 фотографий, которые вы прикрепили.")
-
     await state.update_data(
-        photos=received + len(accepted_photos)
+        photos=received + accepted_photos
     )
 
-    if accepted_photos:
-        builder = MediaGroupBuilder(caption=f"Ваш альбом из {received + len(accepted_photos)} фотографий готов! \n"
-                                    "При выборе более 10 фотографий выбираются \n"
-                                    "только первые 10 из-за условий новостного бота.")
-        for file_id in accepted_photos:
-            builder.add_photo(media=file_id)
-        
-        await messages[0].answer_media_group(builder.build())
+    if len(photos) > diff:
+        await messages[0].answer("Нельзя отправлять более 10 фотографий! Остальные прикреплённые фотографии были удалены.",
+                                 reply_markup=keyboards.done_keyboard)
+    
+    await messages[0].answer("Фотографии приняты!", reply_markup=keyboards.done_keyboard)
 
 
-@user_router.message(F.document, StateFilter(Questions.files))
+@user_router.message(F.document, ~F.media_group_id, StateFilter(Questions.files))
 async def single_file_handler(message: Message, state: FSMContext):
     data = await state.get_data()
+
+    if data.get("document"):
+        await message.answer("Можно прикрепить только один документ формата PDF или DOCX.", reply_markup=keyboards.done_keyboard)
+        return
 
     is_allowed, output = check_input_type(message)
     if not is_allowed:
         await message.answer(output)
         return
-    else:
-        if data.get("document") is not None:
-            await message.answer("Можно прикрепить только один документ формата PDF или DOCX.", reply_markup=keyboards.done_keyboard)
-            return
 
-        document = {
-            "file_id": message.document.file_id,
-            "file_name": message.document.file_name,
-            "file_type": message.document.mime_type
-            }
+    document = {
+        "file_id": message.document.file_id,
+        "file_name": message.document.file_name,
+        "file_type": message.document.mime_type
+        }
 
-        await state.update_data(document=document)
+    await state.update_data(document=document)
 
-        await message.answer("Документ принят!", reply_markup=keyboards.done_keyboard)
+    await message.answer("Документ принят!", reply_markup=keyboards.done_keyboard)
+
+
+@user_router.message(F.document, F.media_group_id, StateFilter(Questions.files))
+@media_group_handler
+async def files_album_handler(messages: list[Message], state: FSMContext):
+    await messages[0].answer("Можно прикрепить только один документ формата PDF или DOCX.", reply_markup=keyboards.done_keyboard)
 
 
 @user_router.message(F.text == "Готово", StateFilter(Questions.files))
@@ -185,11 +185,28 @@ async def files_done(message: Message, state: FSMContext):
         f"Название: {topic}\n"
         f"Текст: {text}\n"
         f"Категория: {category}\n"
-        f"Фотографии: {photos if photos else 0} шт.\n"
+        f"Фотографии: {len(photos)} шт.\n"
         f"Файл: {document['file_name'] if document else 'Нет'}"
     )
 
     await message.answer(result)
+
+    # предпросмотр фотографий:
+    if len(photos) == 1:
+        await message.answer_photo(photo=photos[0])
+    elif len(photos) > 1:
+        builder = MediaGroupBuilder()
+        for photo_id in photos:
+            builder.add_photo(media=photo_id)
+        
+        await message.answer_media_group(
+            media=builder.build()
+        )
+
+    # предпросмотр документа:
+    if document:
+        await message.answer_document(document=document["file_id"])
+    
 
     await state.set_state(UserState.wait_for_choice)
     await message.answer(
@@ -215,16 +232,34 @@ async def edit_or_submit(message: Message, state: FSMContext):
     elif message.text == "Отправить":
         # Получаем данные
         data = await state.get_data()
+        photos = data.get("photos", [])
+        document = data.get("document")
+
         topic = data.get('topic')
         text = data.get('text')
         category = data.get('category')
-        file_id = data.get('file_id')
-        file_name = data.get('file_name')
-        file_type = data.get('file_type')
 
-        if not all([topic, text, category, file_id]):
+        media_ids = []
+        media_types = []
+        media_names = []
+
+        for photo_id in photos:
+            media_ids.append(photo_id)
+            media_types.append("photo")
+            media_names.append(None)
+
+        if document:
+            media_ids.append(document["file_id"])
+            media_ids.append(document["file_type"])
+            media_ids.append(document["file_name"])
+
+        if not all([topic, text, category]):
             await message.answer("Ошибка: не все данные заполнены. Начните заново /start")
             await state.clear()
+            return
+        
+        if not media_ids:
+            await message.answer("Ошибка: необходимо прикрепить хотя бы одно медиа-вложение.")
             return
 
         # Создаём объект Post
@@ -234,14 +269,13 @@ async def edit_or_submit(message: Message, state: FSMContext):
             topic=topic,
             text=text,
             category=category,
-            media_ids=[file_id],
-            media_types=[file_type],
-            media_names=[file_name]
+            media_ids=media_ids,
+            media_types=media_types,
+            media_names=media_names
         )
         # Сохраняем в хранилище
         saved_post = storage.create_post(post)
 
-        # Очищаем состояние
         await state.clear()
         await message.answer(
             f"Готово! Новость отправлена на валидацию (ID #{saved_post.id}).",
