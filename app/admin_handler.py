@@ -8,18 +8,22 @@ import logging
 import json
 import os
 from io import BytesIO
+from dotenv import load_dotenv
 
 from app.storage import storage
 from app.models import Post, Admin
 import app.keyboards as keyboards
 
+load_dotenv()
+
 admin_router = Router()
 logger = logging.getLogger(__name__)
 
-ADMINS = os.getenv("ADMINS")
-SUPER_ADMINS = os.getenv("SUPER_ADMINS")
-admins_list = ADMINS.split(',') if ADMINS else []
-super_admins_list = SUPER_ADMINS.split(',') if SUPER_ADMINS else []
+ADMINS = os.getenv("ADMINS", "")
+admins_list = [x.strip() for x in ADMINS.split(",") if x.strip()]
+
+SUPER_ADMINS = os.getenv("SUPER_ADMINS", "")
+super_admins_list = [x.strip() for x in SUPER_ADMINS.split(",") if x.strip()]
 
 class AdminState(StatesGroup):
     wait_for_choice = State()
@@ -33,8 +37,9 @@ def is_admin(user_id: int) -> bool:
 def is_superadmin(user_id: int) -> bool:
     return storage.is_superadmin(user_id) or (str(user_id) in super_admins_list)
 
-def init_admins(SUPER_ADMINS):
-    for admin_id in SUPER_ADMINS:
+def init_admins(admins_ids):
+    for admin_id in admins_ids:
+        print(admin_id)
         if not storage.get_admin(admin_id):
             admin = Admin(
                 user_id=admin_id,
@@ -43,7 +48,7 @@ def init_admins(SUPER_ADMINS):
                 added_by=admin_id
             )
             storage.add_admin(admin)
-            logger.info(f"Суперадмин {admin_id} инициализирован")
+
 
 # =========== АДМИН ===========
 @admin_router.message(Command("admin"))
@@ -69,7 +74,7 @@ async def start_admin(message: Message, state: FSMContext):
     keyboard = keyboards.get_admin_main_keyboard(pending_count)
     await message.answer(text, reply_markup=keyboard)
 
-# =========== ТОЛЬКО ДЛЯ СУПЕРАДМИНА ===========
+# =========== СУПЕРАДМИН ===========
 @admin_router.message(Command("super"))
 async def start_super_admin(message: Message, state: FSMContext):
     user = message.from_user

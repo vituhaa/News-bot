@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Literal, List
 
 # Типы статусов
-PostStatus = Literal['pending', 'in_progress', 'published', 'rejected', 'returned']
+PostStatus = Literal['pending', 'in_progress', 'published', 'rejected', 'returned', 'draft']
 UserRole = Literal['superadmin', 'admin']
 
 # Модель новости
@@ -16,7 +16,8 @@ class Post:
         category: Optional[str] = None,
         media_ids: Optional[List[str]] = None,
         media_types: Optional[List[str]] = None,
-        media_names: Optional[List[str]] = None
+        media_names: Optional[List[str]] = None,
+        status: PostStatus = 'draft'
     ):
         self.id = None  # будет присвоен при сохранении
         self.user_id = user_id
@@ -29,7 +30,7 @@ class Post:
         self.media_names = media_names or []
 
         # Системные поля
-        self.status: PostStatus = 'draft'
+        self.status = status
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
         
@@ -132,23 +133,20 @@ class Admin:
 # Категории постов
 class Category:
 
-    def __init__(self, name: str, emoji: str = ''):
+    def __init__(self, name: str):
         self.id = None
         self.name = name
-        self.emoji = emoji
 
     def to_dict(self) -> dict:
         return {
             'id': self.id,
             'name': self.name,
-            'emoji': self.emoji
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Category':
         cat = cls(
             name=data['name'],
-            emoji=data.get('emoji', '')
         )
         cat.id = data['id']
         return cat

@@ -16,7 +16,8 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 PROXY_URL = os.getenv('PROXY_URL')
-SUPER_ADMINS = os.getenv("SUPER_ADMINS")
+SUPER_ADMINS = os.getenv("SUPER_ADMINS", "")
+super_admins_list = [x.strip() for x in SUPER_ADMINS.split(",") if x.strip()]
 
 logging.basicConfig(level=logging.INFO)
 
@@ -45,7 +46,7 @@ async def main():
         bot_info = await bot.get_me()
         print(f"Бот @{bot_info.username} подключён")
 
-        init_admins(SUPER_ADMINS)
+        init_admins(super_admins_list)
 
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(bot)

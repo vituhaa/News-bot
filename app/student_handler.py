@@ -271,7 +271,8 @@ async def edit_or_submit(message: Message, state: FSMContext):
             category=category,
             media_ids=media_ids,
             media_types=media_types,
-            media_names=media_names
+            media_names=media_names,
+            status="pending"
         )
         # Сохраняем в хранилище
         saved_post = storage.create_post(post)
@@ -282,8 +283,6 @@ async def edit_or_submit(message: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
 
-        # TODO: уведомить администраторов (можно реализовать позже)
-
     else:
         await message.answer(
             "Используйте кнопки клавиатуры.",
@@ -291,6 +290,6 @@ async def edit_or_submit(message: Message, state: FSMContext):
         )
 
 
-@user_router.message()
-async def any_command(message: Message):
-    await message.answer("Неизвестная команда. Следуйте инструкциям, описанным в сообщениях бота.")
+# @user_router.message()
+# async def any_command(message: Message):
+#     await message.answer("Неизвестная команда. Следуйте инструкциям, описанным в сообщениях бота.")

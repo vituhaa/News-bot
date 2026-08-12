@@ -26,8 +26,8 @@ class Storage:
             ("Спорт", ""),
             ("Обучение", "")
         ]
-        for name, emoji in default_categories:
-            cat = Category(name, emoji)
+        for name in default_categories:
+            cat = Category(name)
             self.add_category(cat)
 
     # ==================== ПОСТЫ ====================
@@ -66,6 +66,10 @@ class Storage:
         """Посты на модерации (pending + revision)"""
         pending = self.get_all_posts(status='pending')
         revision = self.get_all_posts(status='revision')
+        
+        # Проверим, что это объекты Post
+        for p in pending:
+            print(f"[DEBUG] Пост {p.id}: {p.status} ({type(p)})")
         return pending + revision
 
     def update_post(self, post_id: int, **kwargs) -> bool:
