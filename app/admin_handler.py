@@ -3,6 +3,8 @@ from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, InlineKey
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram import Bot
 from datetime import datetime
 import logging
 import json
@@ -24,6 +26,12 @@ admins_list = [x.strip() for x in ADMINS.split(",") if x.strip()]
 
 SUPER_ADMINS = os.getenv("SUPER_ADMINS", "")
 super_admins_list = [x.strip() for x in SUPER_ADMINS.split(",") if x.strip()]
+
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+PROXY_URL = os.getenv('PROXY_URL')
+
+session = AiohttpSession(proxy=PROXY_URL)
+bot = Bot(token=BOT_TOKEN, session=session)
 
 class AdminState(StatesGroup):
     wait_for_choice = State()
@@ -249,17 +257,54 @@ async def approve_post(callback: CallbackQuery):
     if not post.taken_by:
         storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
 
-    storage.update_post(
-        post_id,
-        status='approved',
-        moderated_by=user_id,
-        moderated_at=datetime.now()
-    )
+    channel_info = storage.get_channel_info()
+    conf_info = channel_info["is_configured"]
 
-    await callback.message.edit_text(
-        f"Новость #{post_id} одобрена!\nАвтор: @{post.username}"
-    )
-    await callback.answer("Новость одобрена!")
+    if conf_info:
+        text = f"Новость #{post_id} опубликована в канале!\nАвтор: @{post.username}"
+
+        if callback.message.photo or callback.message.document:
+            await callback.message.edit_caption(
+                caption=text,
+                reply_markup=None
+            )
+        else:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=None
+            )
+
+        chat_id = channel_info["channel_id"] or channel_info["channel_username"]
+        post_text = f"{post.topic} \n\n {post.text} \n\n Тэг: {post.category}"
+
+        if post.media_ids:
+            sent = await bot.send_photo(
+                chat_id=chat_id,
+                photo=post.media_ids[0],
+                caption=post_text,
+                parse_mode='HTML'
+            )
+        else:
+            sent = await bot.send_photo(
+                chat_id=chat_id,
+                caption=post_text,
+                parse_mode='HTML'
+            )
+
+        storage.update_post(
+            post_id,
+            status='published',
+            moderated_by=user_id,
+            moderated_at=datetime.now(),
+            channel_message_id=sent.message_id,
+            channel_post_url=sent.get_url()
+        )
+
+        await callback.answer("Новость одобрена!")
+    else:
+        await callback.answer("Сначала укажите канал в настройках.")
+        return
+    
 
 @admin_router.callback_query(lambda c: c.data.startswith("revision_"))
 async def revision_post(callback: CallbackQuery, state: FSMContext):
