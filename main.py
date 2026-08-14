@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from app.student_handler import user_router
 from app.admin_handler import admin_router, init_admins
+from app.superadmin_handler import super_router
 
 load_dotenv()
 
@@ -24,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 dispatcher = Dispatcher()
 dispatcher.include_router(user_router)
 dispatcher.include_router(admin_router)
-
+dispatcher.include_router(super_router)
 
 @dispatcher.message(Command("id"))
 async def get_id(message: Message):

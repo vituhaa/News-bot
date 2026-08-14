@@ -44,21 +44,24 @@ def get_admin_main_keyboard(pending_count: int = 0) -> InlineKeyboardMarkup:
     ])
 
 # Клавиатура для модерации
-def get_admin_post_keyboard(post_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def get_admin_post_keyboard(post_id: int, show_next: bool = True) -> InlineKeyboardMarkup:
+    buttons = [
         [InlineKeyboardButton(text="Одобрить", callback_data=f"approve_{post_id}"),
         InlineKeyboardButton(text="На доработку", callback_data=f"revision_{post_id}")],
 
         [InlineKeyboardButton(text="Отклонить", callback_data=f"reject_{post_id}"),
         InlineKeyboardButton(text="Выгрузить JSON", callback_data=f"export_{post_id}")],
-
-        [InlineKeyboardButton(text="Следующий", callback_data="admin_next")]
-    ])
+        [InlineKeyboardButton(text="Назад", callback_data="admin_back")]
+    ]
+    if show_next:
+        buttons.append([InlineKeyboardButton(text="Следующий", callback_data="admin_next")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def confirm_desicion_to_delete(post_id: int) -> InlineKeyboardMarkup: 
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Да", callback_data=f"confirm_reject_{post_id}"),
         InlineKeyboardButton(text="Нет", callback_data=f"cancel_reject_{post_id}")],
+        [InlineKeyboardButton(text="Назад", callback_data="admin_back")]
     ])
 
 # Клавиатура настроек
