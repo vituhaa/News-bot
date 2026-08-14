@@ -36,6 +36,7 @@ bot = Bot(token=BOT_TOKEN, session=session)
 
 class AdminState(StatesGroup):
     wait_for_choice = State()
+    delete_admin = State()
     wait_for_comment = State()
     wait_for_channel = State()
     wait_for_user_id = State()
@@ -110,13 +111,42 @@ async def process_super_choice(message: Message, state: FSMContext):
             for i, admin in enumerate(admins, 1):
                 role = "Суперадмин" if admin.role == 'superadmin' else "Админ"
                 text += f"{i}. @{admin.username} (ID: {admin.user_id}) - {role}\n"
-        await message.answer(text, reply_markup=ReplyKeyboardRemove())
-        await state.clear()
+        await message.answer(text, reply_markup=keyboards.super_admin_keyboard)
+        # await state.clear()
+    elif message.text == "Удалить админа":
+        await state.set_state(AdminState.delete_admin)
+        await message.answer(
+            "Удаление администратора.\n\nВведите Telegram ID пользователя, которого нужно удалить:"
+        )
     else:
         await message.answer(
             "Неверная команда. Выберите из предложенных кнопок.",
             reply_markup=keyboards.super_admin_keyboard
         )
+
+@admin_router.message(AdminState.delete_admin)
+async def process_delete_admin(message: Message, state: FSMContext):
+    try:
+        delete_admin_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("Неверный ввод! Введите числовой ID (например, 123456789):")
+        return
+    
+    if not storage.get_admin(delete_admin_id):
+        await message.answer(
+            "Этот пользователь не является администратором.",
+            reply_markup=keyboards.super_admin_keyboard
+        )
+        await state.set_state(AdminState.wait_for_choice)
+        return
+    
+    storage.remove_admin(delete_admin_id)
+    await message.answer(
+        f"Администратор удалён: {delete_admin_id}",
+        reply_markup=keyboards.super_admin_keyboard
+    )
+    await state.set_state(AdminState.wait_for_choice)
+
 
 @admin_router.message(AdminState.wait_for_user_id)
 async def process_new_admin(message: Message, state: FSMContext):
@@ -131,7 +161,7 @@ async def process_new_admin(message: Message, state: FSMContext):
             "Этот пользователь уже является администратором.",
             reply_markup=keyboards.super_admin_keyboard
         )
-        await state.clear()
+        await state.set_state(AdminState.wait_for_choice)
         return
 
     admin = Admin(
@@ -146,7 +176,8 @@ async def process_new_admin(message: Message, state: FSMContext):
         f"Новый администратор добавлен: {new_admin_id}",
         reply_markup=keyboards.super_admin_keyboard
     )
-    await state.clear()
+    await state.set_state(AdminState.wait_for_choice)
+
 
 # Посты, приходящие администратоам
 @admin_router.callback_query(lambda c: c.data == "admin_inbox")
@@ -327,7 +358,7 @@ async def approve_post(callback: CallbackQuery):
                 )
                 return
 
-        post_text = f"{post.topic} \n\n {post.text} \n\n Тэг: {post.category}"
+        post_text = f"{post.topic} \n {post.text} \n Тэг: {post.category}"
 
         if post.media_ids:
             sent = await bot.send_photo(
@@ -388,14 +419,23 @@ async def revision_post(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-@admin_router.callback_query(lambda c: c.data.startswith("reject_"))
+
+@admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
 async def reject_post(callback: CallbackQuery):
     user_id = callback.from_user.id
     if not is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
-    post_id = int(callback.data.split('_')[1])
+    parts = callback.data.split('_')
+    if len(parts) < 2 or not parts[1].isdigit():
+        await callback.answer(
+            "Неверный формат запроса. Используйте кнопки с ID поста.",
+            show_alert=True
+        )
+        return
+
+    post_id = int(parts[1])
     post = storage.get_post(post_id)
     if not post:
         await callback.answer("Пост не найден", show_alert=True)
@@ -410,15 +450,76 @@ async def reject_post(callback: CallbackQuery):
     if not post.taken_by:
         storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
 
+    await callback.message.answer(
+        f"Вы точно хотите отклонить пост #{post_id}?\n\n"
+        f"Текст поста:\n{post.text}", 
+        reply_markup=keyboards.confirm_desicion_to_delete(post_id)
+    )
+
+    await callback.answer()
+
+
+@admin_router.callback_query(lambda c: c.data.startswith("confirm_reject_"))
+async def confirm_rejecting_post(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
+        await callback.answer("У вас нет прав администратора.", show_alert=True)
+        return
+
+    parts = callback.data.split('_')
+    if len(parts) < 3 or not parts[2].isdigit():
+        await callback.answer(
+            "Неверный формат запроса. Используйте кнопки с ID поста.",
+            show_alert=True
+        )
+        return
+
+    post_id = int(parts[2])
+    
+    post = storage.get_post(post_id)
+    if not post:
+        await callback.answer("Пост не найден", show_alert=True)
+        return
+    
     storage.update_post(
         post_id,
         status='rejected',
         moderated_by=user_id,
         moderated_at=datetime.now()
     )
-
+    
     await callback.message.edit_text(f"Новость #{post_id} отклонена.")
-    await callback.answer("Новость отклонена!")
+    await callback.message.answer("Панель администратора: ", reply_markup=keyboards.get_admin_main_keyboard())
+
+
+@admin_router.callback_query(lambda c: c.data.startswith("cancel_reject_"))
+async def cancel_rejecting_post(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
+        await callback.answer("У вас нет прав администратора.", show_alert=True)
+        return
+
+    parts = callback.data.split('_')
+    if len(parts) < 3 or not parts[2].isdigit():
+        await callback.answer(
+            "Неверный формат запроса. Используйте кнопки с ID поста.",
+            show_alert=True
+        )
+        return
+
+    post_id = int(parts[2])
+    post = storage.get_post(post_id)
+    if not post:
+        await callback.answer("Пост не найден", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"Отмена отклонения поста #{post_id}\n\n"
+        f"Пост возвращен на модерацию."
+    )
+    
+    await callback.message.answer("Панель администратора: ", reply_markup=keyboards.get_admin_main_keyboard())
+
 
 @admin_router.callback_query(lambda c: c.data.startswith("export_"))
 async def export_post(callback: CallbackQuery):
@@ -443,6 +544,7 @@ async def export_post(callback: CallbackQuery):
         caption=f"Выгрузка новости #{post_id}"
     )
     await callback.answer("JSON выгружен!")
+
 
 @admin_router.message(AdminState.wait_for_comment)
 async def process_comment(message: Message, state: FSMContext):
@@ -510,96 +612,6 @@ async def admin_settings(callback: CallbackQuery):
     await callback.message.edit_text(
         "Настройки:\n\nЗдесь можно настроить канал для публикации.",
         reply_markup=keyboard
-    )
-    await callback.answer()
-
-@admin_router.callback_query(lambda c: c.data == "admin_set_channel")
-async def admin_set_channel(callback: CallbackQuery, state: FSMContext):
-    if not is_superadmin(callback.from_user.id):
-        await callback.answer("Только суперадмин может настраивать канал.", show_alert=True)
-        return
-
-    await state.set_state(AdminState.wait_for_channel)
-    await callback.message.edit_text(
-        "Установка канала\n\nВведите ссылку канала (например, https://t.me/newsbottest100)\nили username канала (например, @newsbottest100):"
-    )
-    await callback.answer()
-
-@admin_router.message(AdminState.wait_for_channel)
-async def process_channel(message: Message, state: FSMContext):
-    if not is_superadmin(message.from_user.id):
-        await message.answer("У вас нет прав суперадминистратора.")
-        await state.clear()
-        return
-
-    channel = message.text.strip()
-    if channel.startswith('@'):
-        storage.set_setting('channel_username', channel)
-        storage.set_setting('channel_link', None)
-    elif channel.startswith('https://t.me/'):
-        storage.set_setting('channel_link', channel)
-        storage.set_setting('channel_username', None)
-
-    await message.answer(f"Канал установлен: {channel}", reply_markup=ReplyKeyboardRemove())
-    await state.clear()
-
-# =========== УПРАВЛЕНИЕ АДМИНАМИ ===========
-
-@admin_router.callback_query(lambda c: c.data == "admin_manage")
-async def admin_manage(callback: CallbackQuery):
-    if not is_superadmin(callback.from_user.id):
-        await callback.answer("Только суперадмин может управлять админами.", show_alert=True)
-        return
-
-    keyboard = keyboards.get_admin_manage_keyboard()
-    await callback.message.edit_text(
-        "Управление администраторами:\n\nЗдесь можно добавлять и удалять администраторов.",
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
-@admin_router.callback_query(lambda c: c.data == "admin_add")
-async def admin_add(callback: CallbackQuery, state: FSMContext):
-    if not is_superadmin(callback.from_user.id):
-        await callback.answer("Только суперадмин может добавлять админов.", show_alert=True)
-        return
-
-    await state.set_state(AdminState.wait_for_user_id)
-    await callback.message.edit_text(
-        "Добавление администратора\n\nВведите Telegram ID пользователя (число):"
-    )
-    await callback.answer()
-
-@admin_router.callback_query(lambda c: c.data == "admin_list")
-async def admin_list(callback: CallbackQuery):
-    if not is_superadmin(callback.from_user.id):
-        await callback.answer("Только суперадмин может просматривать список.", show_alert=True)
-        return
-
-    admins = storage.get_all_admins()
-    if not admins:
-        text = "Список администраторов пуст."
-    else:
-        text = "Список администраторов:\n\n"
-        for i, admin in enumerate(admins, 1):
-            role = "Суперадмин" if admin.role == 'superadmin' else "Админ"
-            text += f"{i}. @{admin.username} (ID: {admin.user_id}) - {role}\n"
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Назад", callback_data="admin_manage")]
-    ])
-    await callback.message.edit_text(text, reply_markup=keyboard)
-    await callback.answer()
-
-@admin_router.callback_query(lambda c: c.data == "admin_remove")
-async def admin_remove(callback: CallbackQuery, state: FSMContext):
-    if not is_superadmin(callback.from_user.id):
-        await callback.answer("Только суперадмин может удалять админов.", show_alert=True)
-        return
-
-    await state.set_state(AdminState.wait_for_user_id)
-    await callback.message.edit_text(
-        "Удаление администратора\n\nВведите Telegram ID пользователя, которого нужно удалить:"
     )
     await callback.answer()
 

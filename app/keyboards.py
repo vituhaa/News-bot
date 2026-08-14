@@ -55,6 +55,12 @@ def get_admin_post_keyboard(post_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Следующий", callback_data="admin_next")]
     ])
 
+def confirm_desicion_to_delete(post_id: int) -> InlineKeyboardMarkup: 
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Да", callback_data=f"confirm_reject_{post_id}"),
+        InlineKeyboardButton(text="Нет", callback_data=f"cancel_reject_{post_id}")],
+    ])
+
 # Клавиатура настроек
 def get_admin_settings_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -80,7 +86,8 @@ back_to_admin = InlineKeyboardMarkup(inline_keyboard=[
 super_admin_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text='Добавить админа')],
-        [KeyboardButton(text='Список текущих админов')]
+        [KeyboardButton(text='Список текущих админов')],
+        [KeyboardButton(text='Удалить админа')]
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие",
