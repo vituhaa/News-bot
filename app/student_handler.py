@@ -288,8 +288,3 @@ async def edit_or_submit(message: Message, state: FSMContext):
             "Используйте кнопки клавиатуры.",
             reply_markup=keyboards.edit_news_keyboard
         )
-
-
-# @user_router.message()
-# async def any_command(message: Message):
-#     await message.answer("Неизвестная команда. Следуйте инструкциям, описанным в сообщениях бота.")

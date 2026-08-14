@@ -9,6 +9,7 @@ from datetime import datetime
 import logging
 import json
 import os
+import re
 from io import BytesIO
 from dotenv import load_dotenv
 
@@ -74,7 +75,7 @@ async def start_admin(message: Message, state: FSMContext):
 
     channel_info = storage.get_channel_info()
     if channel_info['is_configured']:
-        channel_display = channel_info.get('channel_username') or channel_info.get('channel_id')
+        channel_display = channel_info.get('channel_username') or channel_info.get('channel_link')
         text += f"Канал: {channel_display}\n"
     else:
         text += "Канал не настроен\n"
@@ -274,7 +275,58 @@ async def approve_post(callback: CallbackQuery):
                 reply_markup=None
             )
 
-        chat_id = channel_info["channel_id"] or channel_info["channel_username"]
+        chat_id = channel_info.get("channel_link") or channel_info.get("channel_username")
+        value = chat_id.strip()
+        if 't.me' in value or 'telegram.me' in value:
+            match = re.search(r't\.me/([a-zA-Z0-9_]+)', value)
+            if match:
+                username = match.group(1)
+                username_with_at = f"@{username}"
+            else:
+                await callback.answer(
+                    "Не удалось распознать ссылку на канал. "
+                    "Используйте формат: https://t.me/newsbottest100",
+                    show_alert=True
+                )
+                return
+        elif value.startswith('@'):
+            username_with_at = value
+            username = value[1:]
+        else:
+            username = value
+            username_with_at = f"@{value}"
+
+        try:
+            chat = await bot.get_chat(username_with_at)
+            chat_id = chat.id
+            storage.set_setting('channel_id', chat.id)
+            
+            await callback.answer(
+                f"Канал успешно подключен: {chat.title}",
+                show_alert=True
+            )
+            
+        except Exception as e:
+            try:
+                chat = await bot.get_chat(username)
+                chat_id = chat.id
+                storage.set_setting('channel_id', chat.id)
+                
+                await callback.answer(
+                    f"Канал успешно подключен: {chat.title}",
+                    show_alert=True
+                )
+                
+            except Exception as e2:            
+                await callback.answer(
+                    "Не удалось найти канал. Проверьте:\n"
+                    "1. Правильность ссылки\n"
+                    "2. Бот является администратором\n"
+                    "3. Канал публичный",
+                    show_alert=True
+                )
+                return
+
         post_text = f"{post.topic} \n\n {post.text} \n\n Тэг: {post.category}"
 
         if post.media_ids:
@@ -469,7 +521,7 @@ async def admin_set_channel(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(AdminState.wait_for_channel)
     await callback.message.edit_text(
-        "Установка канала\n\nВведите ID канала (например, -1001234567890)\nили username канала (например, @my_channel):"
+        "Установка канала\n\nВведите ссылку канала (например, https://t.me/newsbottest100)\nили username канала (например, @newsbottest100):"
     )
     await callback.answer()
 
@@ -483,9 +535,9 @@ async def process_channel(message: Message, state: FSMContext):
     channel = message.text.strip()
     if channel.startswith('@'):
         storage.set_setting('channel_username', channel)
-        storage.set_setting('channel_id', None)
-    else:
-        storage.set_setting('channel_id', channel)
+        storage.set_setting('channel_link', None)
+    elif channel.startswith('https://t.me/'):
+        storage.set_setting('channel_link', channel)
         storage.set_setting('channel_username', None)
 
     await message.answer(f"Канал установлен: {channel}", reply_markup=ReplyKeyboardRemove())

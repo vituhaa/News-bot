@@ -11,11 +11,10 @@ class Storage:
         self._post_counter = 0
         self._category_counter = 0
         self._settings = {
-            'channel_id': None,
+            'channel_link': None,
             'channel_username': None,
             'moderation_timeout': 600
         }
-     # self._init_default_categories()  # категории задаются в клавиатуре
 
     # Категории
     def _init_default_categories(self):
@@ -135,9 +134,9 @@ class Storage:
 
     def get_channel_info(self) -> dict:
         return {
-            'channel_id': self._settings.get('channel_id'),
+            'channel_link': self._settings.get('channel_link'),
             'channel_username': self._settings.get('channel_username'),
-            'is_configured': bool(self._settings.get('channel_id') or self._settings.get('channel_username'))
+            'is_configured': bool(self._settings.get('channel_link') or self._settings.get('channel_username'))
         }
 
     # Для получения сводки о постах
@@ -158,5 +157,4 @@ class Storage:
                 stats[status] += 1
         return stats
 
-# Создаём глобальный экземпляр хранилища
 storage = Storage()
