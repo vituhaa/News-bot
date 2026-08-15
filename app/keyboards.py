@@ -57,14 +57,14 @@ def get_admin_post_keyboard(post_id: int, show_next: bool = True) -> InlineKeybo
         buttons.append([InlineKeyboardButton(text="Следующий", callback_data="admin_next")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-""" ----Больше не вызывается с новой логикой отклонения постов
+
 def confirm_desicion_to_delete(post_id: int) -> InlineKeyboardMarkup: 
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Да", callback_data=f"confirm_reject_{post_id}"),
         InlineKeyboardButton(text="Нет", callback_data=f"cancel_reject_{post_id}")],
         [InlineKeyboardButton(text="Назад", callback_data="admin_back")]
     ])
-"""
+
 
 # Клавиатура настроек
 def get_admin_settings_keyboard() -> InlineKeyboardMarkup:

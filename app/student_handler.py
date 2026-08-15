@@ -1,5 +1,5 @@
 from aiogram import F, Router
-from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -22,7 +22,7 @@ class Questions(StatesGroup):
     files = State()
 
 class UserState(StatesGroup):
-    wait_for_choice = State()
+    wait_for_choice = State() 
 
 def check_input_type(message: Message) -> tuple[bool, str]:
     allowed = {
@@ -253,8 +253,8 @@ async def edit_or_submit(message: Message, state: FSMContext):
 
         if document:
             media_ids.append(document["file_id"])
-            media_ids.append(document["file_type"])
-            media_ids.append(document["file_name"])
+            # media_ids.append(document["file_type"])
+            # media_ids.append(document["file_name"])
 
         if not all([topic, text, category]):
             await message.answer("Ошибка: не все данные заполнены. Начните заново /start")

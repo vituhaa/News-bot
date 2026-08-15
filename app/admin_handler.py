@@ -1,5 +1,5 @@
 from aiogram import Router
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, BufferedInputFile, InputMediaPhoto
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -79,8 +79,6 @@ def format_post_text(post: Post) -> str:
     text += f"\nТЕКСТ:\n{post.text}\n"
     if post.media_ids:
         text += f"\nВЛОЖЕНИЯ: {len(post.media_ids)} шт.\n"
-        for i, name in enumerate(post.media_names, 1):
-            text += f"  {i}. {name}\n"
     if post.comment:
         text += f"\nКОММЕНТАРИЙ:\n{post.comment}\n"
     return text
@@ -138,9 +136,8 @@ async def review_post_by_id(message: Message):
         await message.answer(f"Новость с ID {post_id} не найдена.")
         return
 
-    # Показываем карточку поста (функция уже имелась)
     await show_post_to_admin(message, post, show_next=False)
-#
+
 
 @admin_router.callback_query(lambda c: c.data == "admin_inbox")
 async def admin_inbox(callback: CallbackQuery):
@@ -189,25 +186,58 @@ async def show_post_to_admin(message: Message, post: Post, progress: str = "", s
         text = f"{progress}\n {text}"
     keyboard = keyboards.get_admin_post_keyboard(post.id, show_next=show_next)
 
-    if post.media_ids and post.media_ids[0]:
-        try:
-            if post.media_types[0] == 'photo':
-                await message.answer_photo(
-                    photo=post.media_ids[0],
-                    caption=text,
-                    reply_markup=keyboard
-                )
-            else:
-                await message.answer_document(
-                    document=post.media_ids[0],
-                    caption=text,
-                    reply_markup=keyboard
-                )
-            return
-        except Exception as e:
-            logger.error(f"Ошибка отправки медиа: {e}")
+    photos = []
+    documents = []
 
-    await message.answer(text, reply_markup=keyboard)
+    for i, media_id in enumerate(post.media_ids):
+        if i < len(post.media_types):
+            media_type = post.media_types[i]
+        else:
+            media_type = 'unknown'
+        
+        if media_type == 'photo':
+            photos.append(media_id)
+        elif media_type == 'document':
+            documents.append(media_id)
+        else:
+            documents.append(media_id)
+
+    if photos:
+        if len(photos) == 1:
+            await message.answer_photo(
+                photo=photos[0],
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        else:
+            await message.answer_photo(
+                photo=photos[0],
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            if len(photos) > 1:
+                album = []
+                for photo_id in photos[1:]:
+                    album.append(InputMediaPhoto(media=photo_id))
+                
+                await message.answer_media_group(media=album)
+
+
+    if documents:
+        for i, doc_id in enumerate(documents):
+            caption = text if not photos and i == 0 else None
+            reply_markup = keyboard if not photos and i == 0 else None
+            
+            await message.answer_document(
+                document=doc_id,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode='HTML' if caption else None
+            )
+
+    # await message.answer(text, reply_markup=keyboard)
 
 
 @admin_router.callback_query(lambda c: c.data.startswith("approve_"))
@@ -373,90 +403,6 @@ async def revision_post(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-"""@admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
-async def reject_post(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    if not is_admin(user_id):
-        await callback.answer("У вас нет прав администратора.", show_alert=True)
-        return
-
-    parts = callback.data.split('_')
-    if len(parts) < 2 or not parts[1].isdigit():
-        await callback.answer(
-            "Неверный формат запроса. Используйте кнопки с ID поста.",
-            show_alert=True
-        )
-        return
-
-    post_id = int(parts[1])
-    post = storage.get_post(post_id)
-    if not post:
-        await callback.answer("Пост не найден", show_alert=True)
-        return
-
-    if post.status == 'pending' and post.taken_by and post.taken_by != user_id:
-        admin = storage.get_admin(post.taken_by)
-        admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
-        await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
-        return
-
-    if not post.taken_by:
-        storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
-
-    await callback.message.answer(
-        f"Вы точно хотите отклонить пост #{post_id}?\n\n"
-        f"Текст поста:\n{post.text}", 
-        reply_markup=keyboards.confirm_desicion_to_delete(post_id)
-    )
-
-    await callback.answer()
-
-@admin_router.callback_query(lambda c: c.data.startswith("confirm_reject_"))
-async def confirm_rejecting_post(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    if not is_admin(user_id):
-        await callback.answer("У вас нет прав администратора.", show_alert=True)
-        return
-
-    parts = callback.data.split('_')
-    if len(parts) < 3 or not parts[2].isdigit():
-        await callback.answer(
-            "Неверный формат запроса. Используйте кнопки с ID поста.",
-            show_alert=True
-        )
-        return
-
-    post_id = int(parts[2])
-    
-    post = storage.get_post(post_id)
-    if not post:
-        await callback.answer("Пост не найден", show_alert=True)
-        return
-    
-    storage.update_post(
-        post_id,
-        status='rejected',
-        moderated_by=user_id,
-        moderated_at=datetime.now()
-    )
-
-    # отсылаем уведомление автору поста при оотклонении
-    try:
-        await bot.send_message(
-            post.user_id,
-            f"❌ Ваша новость \"{post.topic}\" отклонена модератором."
-        )
-    except Exception as e:
-        logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
-    #
-
-    pending_posts = storage.get_pending_posts()
-    pending_count = len(pending_posts)
-    
-    await callback.message.edit_text(f"Новость #{post_id} отклонена.")
-    await callback.message.answer("Панель администратора: ", reply_markup=keyboards.get_admin_main_keyboard(pending_count))
-
-""" 
 # удалим код выше с прошлой логикой отклонения после теста новой  (ниже)
 @admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
 async def reject_post(callback: CallbackQuery, state: FSMContext):
@@ -488,14 +434,12 @@ async def reject_post(callback: CallbackQuery, state: FSMContext):
     if not post.taken_by:
         storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
 
-    # Запоминаем ID поста, переключаемся на ввод комментария
-    await state.update_data(post_id=post_id)
-    await state.set_state(AdminState.wait_for_reject_comment)
-
-    await callback.message.edit_text(
-        f"❌ Отклонение новости #{post_id}.\nНапишите причину отклонения для автора (минимум 10 символов):"
+    await callback.message.answer(
+        f"Вы точно хотите отклонить пост #{post_id}?\n"
+        f"Текст поста:\n{post.text}", 
+        reply_markup=keyboards.confirm_desicion_to_delete(post_id)
     )
-    await callback.answer()
+    
 
 @admin_router.message(AdminState.wait_for_reject_comment)
 async def process_reject_comment(message: Message, state: FSMContext):
@@ -535,7 +479,7 @@ async def process_reject_comment(message: Message, state: FSMContext):
     try:
         await bot.send_message(
             post.user_id,
-            f"❌ Ваша новость \"{post.topic}\" (ID #{post_id}) отклонена.\n"
+            f"Ваша новость \"{post.topic}\" (ID #{post_id}) отклонена.\n"
             f"Причина: {comment}"
         )
     except Exception as e:
@@ -551,6 +495,45 @@ async def process_reject_comment(message: Message, state: FSMContext):
     await state.clear()
 
 #-----------------------------------------------------------------------------------------конец для новой логики отклонения тут.
+
+@admin_router.callback_query(lambda c: c.data.startswith("confirm_reject_"))
+async def confirm_rejecting_post(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
+        await callback.answer("У вас нет прав администратора.", show_alert=True)
+        return
+
+    parts = callback.data.split('_')
+    if len(parts) < 3 or not parts[2].isdigit():
+        await callback.answer(
+            "Неверный формат запроса. Используйте кнопки с ID поста.",
+            show_alert=True
+        )
+        return
+
+    post_id = int(parts[2])
+    
+    post = storage.get_post(post_id)
+    if not post:
+        await callback.answer("Пост не найден", show_alert=True)
+        return
+    
+    storage.update_post(
+        post_id,
+        status='rejected',
+        moderated_by=user_id,
+        moderated_at=datetime.now()
+    )
+
+    # Запоминаем ID поста, переключаемся на ввод комментария
+    await state.update_data(post_id=post_id)
+    await state.set_state(AdminState.wait_for_reject_comment)
+
+    await callback.message.answer(
+        f"Отклонение новости #{post_id}.\nНапишите причину отклонения для автора (минимум 10 символов):"
+    )
+    await callback.answer()
+
 
 @admin_router.callback_query(lambda c: c.data.startswith("cancel_reject_"))
 async def cancel_rejecting_post(callback: CallbackQuery):
