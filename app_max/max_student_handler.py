@@ -1,11 +1,3 @@
-#from aiogram import F, Router
-#from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
-#from aiogram.filters import Command, StateFilter
-#from aiogram.fsm.state import State, StatesGroup
-#from aiogram.fsm.context import FSMContext
-#from aiogram.utils.media_group import MediaGroupBuilder
-#from aiogram_media_group import media_group_handler
-
 from maxapi import F, Router
 from maxapi.types import MessageCreated, CallbackQueryCreated
 from maxapi.filters.command import CommandStart, Command

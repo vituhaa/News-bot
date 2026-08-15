@@ -35,6 +35,7 @@ class AdminState(StatesGroup):
     wait_for_choice = State()
     delete_admin = State()
     wait_for_comment = State()
+    wait_for_reject_comment = State()
     wait_for_channel = State()
     wait_for_user_id = State()
 
@@ -113,6 +114,33 @@ async def show_admin_panel(message: Message, user_id: int):
     keyboard = keyboards.get_admin_main_keyboard(pending_posts)
     await message.answer(text, reply_markup=keyboard)
 
+# так как администраторы должны иметь возможность перейти к заявке по ID:
+@admin_router.message(Command("review"))
+async def review_post_by_id(message: Message):
+    user_id = message.from_user.id
+    if not is_admin(user_id):
+        await message.answer("У вас нет прав администратора.")
+        return
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("Укажите ID новости, например: /review 123")
+        return
+
+    try:
+        post_id = int(args[1])
+    except ValueError:
+        await message.answer("ID должен быть числом.")
+        return
+
+    post = storage.get_post(post_id)
+    if not post:
+        await message.answer(f"Новость с ID {post_id} не найдена.")
+        return
+
+    # Показываем карточку поста (функция уже имелась)
+    await show_post_to_admin(message, post, show_next=False)
+#
 
 @admin_router.callback_query(lambda c: c.data == "admin_inbox")
 async def admin_inbox(callback: CallbackQuery):
@@ -298,6 +326,16 @@ async def approve_post(callback: CallbackQuery):
             channel_post_url=sent.get_url()
         )
 
+        # Отсылаем уведомление студенту при публикации
+        try:
+            await bot.send_message(
+                post.user_id,
+                f"✅ Ваша новость опубликована! Смотреть: {sent.get_url()}"
+            )
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
+        #
+
         await callback.answer("Новость одобрена!")
     else:
         await callback.answer("Сначала укажите канал в настройках.")
@@ -335,7 +373,7 @@ async def revision_post(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
+"""@admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
 async def reject_post(callback: CallbackQuery):
     user_id = callback.from_user.id
     if not is_admin(user_id):
@@ -373,7 +411,6 @@ async def reject_post(callback: CallbackQuery):
 
     await callback.answer()
 
-
 @admin_router.callback_query(lambda c: c.data.startswith("confirm_reject_"))
 async def confirm_rejecting_post(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -403,12 +440,117 @@ async def confirm_rejecting_post(callback: CallbackQuery):
         moderated_at=datetime.now()
     )
 
+    # отсылаем уведомление автору поста при оотклонении
+    try:
+        await bot.send_message(
+            post.user_id,
+            f"❌ Ваша новость \"{post.topic}\" отклонена модератором."
+        )
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
+    #
+
     pending_posts = storage.get_pending_posts()
     pending_count = len(pending_posts)
     
     await callback.message.edit_text(f"Новость #{post_id} отклонена.")
     await callback.message.answer("Панель администратора: ", reply_markup=keyboards.get_admin_main_keyboard(pending_count))
 
+""" 
+# удалим код выше с прошлой логикой отклонения после теста новой  (ниже)
+@admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
+async def reject_post(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
+        await callback.answer("У вас нет прав администратора.", show_alert=True)
+        return
+
+    parts = callback.data.split('_')
+    if len(parts) < 2 or not parts[1].isdigit():
+        await callback.answer(
+            "Неверный формат запроса. Используйте кнопки с ID поста.",
+            show_alert=True
+        )
+        return
+
+    post_id = int(parts[1])
+    post = storage.get_post(post_id)
+    if not post:
+        await callback.answer("Пост не найден", show_alert=True)
+        return
+
+    if post.status == 'pending' and post.taken_by and post.taken_by != user_id:
+        admin = storage.get_admin(post.taken_by)
+        admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
+        await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
+        return
+
+    if not post.taken_by:
+        storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
+
+    # Запоминаем ID поста, переключаемся на ввод комментария
+    await state.update_data(post_id=post_id)
+    await state.set_state(AdminState.wait_for_reject_comment)
+
+    await callback.message.edit_text(
+        f"❌ Отклонение новости #{post_id}.\nНапишите причину отклонения для автора (минимум 10 символов):"
+    )
+    await callback.answer()
+
+@admin_router.message(AdminState.wait_for_reject_comment)
+async def process_reject_comment(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if not is_admin(user_id):
+        await message.answer("У вас нет прав администратора.")
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    post_id = data.get('post_id')
+    if not post_id:
+        await message.answer("Ошибка: не найден ID поста. Попробуйте снова.")
+        await state.clear()
+        return
+
+    comment = message.text
+    if len(comment) < 10:
+        await message.answer("Причина отклонения должна содержать минимум 10 символов. Напишите подробнее:")
+        return
+
+    post = storage.get_post(post_id)
+    if not post:
+        await message.answer("Пост не найден")
+        await state.clear()
+        return
+
+    storage.update_post(
+        post_id,
+        status='rejected',
+        moderated_by=user_id,
+        moderated_at=datetime.now(),
+        comment=comment
+    )
+
+    # отсылаем уведомление автору поста при оотклонении
+    try:
+        await bot.send_message(
+            post.user_id,
+            f"❌ Ваша новость \"{post.topic}\" (ID #{post_id}) отклонена.\n"
+            f"Причина: {comment}"
+        )
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
+    # 
+
+    await message.answer(f"✅ Новость #{post_id} отклонена. Причина отправлена автору.")
+
+    pending_posts = storage.get_pending_posts()
+    pending_count = len(pending_posts)
+    await message.answer("Панель администратора:", reply_markup=keyboards.get_admin_main_keyboard(pending_count))
+
+    await state.clear()
+
+#-----------------------------------------------------------------------------------------конец для новой логики отклонения тут.
 
 @admin_router.callback_query(lambda c: c.data.startswith("cancel_reject_"))
 async def cancel_rejecting_post(callback: CallbackQuery):
@@ -495,6 +637,18 @@ async def process_comment(message: Message, state: FSMContext):
         moderated_at=datetime.now(),
         comment=comment
     )
+
+    # Отсылаем уведомление студенту о возврате на доработку
+    try:
+        await bot.send_message(
+            post.user_id,
+            f"🔗 Ваша новость \"{post.topic}\" требует правок. "
+            f"Комментарий модератора: {comment}. "
+            f"Исправьте, нажав кнопку ниже."
+        )
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
+    #
 
     await message.answer(f"Новость #{post_id} возвращена автору.\nКомментарий: {comment}")
     await state.clear()

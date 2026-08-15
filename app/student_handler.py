@@ -10,6 +10,9 @@ import app.keyboards as keyboards
 from app.storage import storage
 from app.models import Post
 
+import logging
+logger = logging.getLogger(__name__)
+
 user_router = Router()
 
 class Questions(StatesGroup):
@@ -276,6 +279,20 @@ async def edit_or_submit(message: Message, state: FSMContext):
         )
         # Сохраняем в хранилище
         saved_post = storage.create_post(post)
+
+        # Отсылаем уведомление всем администраторам 
+        admins = storage.get_all_admins()
+        for admin in admins:
+            try:
+                await message.bot.send_message(
+                    admin.user_id,
+                    f"❗️ Новая новость от @{saved_post.username or 'пользователь'} (ID: {saved_post.user_id}):\n"
+                    f"Заголовок: {saved_post.topic}\n"
+                    f"Для обработки нажмите /review {saved_post.id}"
+                )
+            except Exception as e:
+                logger.error(f"Не удалось отправить уведомление админу {admin.user_id}: {e}")
+
 
         await state.clear()
         await message.answer(
