@@ -659,9 +659,11 @@ async def admin_set_channel(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(AdminState.wait_for_channel)
     await callback.message.edit_text(
-        "Установка канала.\n Введите ID канала (например, https://t.me/newsbottest100)\nили username канала (например, @newsbottest100):"
+        "Установка канала.\n Введите ID канала (например, https://t.me/newsbottest100)\nили username канала (например, @newsbottest100):",
+        reply_markup=keyboards.back_to_admin
     )
     await callback.answer()
+
 
 @admin_router.message(AdminState.wait_for_channel)
 async def process_channel(message: Message, state: FSMContext):
@@ -678,7 +680,7 @@ async def process_channel(message: Message, state: FSMContext):
         storage.set_setting('channel_link', channel)
         storage.set_setting('channel_username', None)
 
-    await message.answer(f"Канал установлен: {channel}", reply_markup=ReplyKeyboardRemove())
+    await message.answer(f"Канал установлен: {channel}", reply_markup=keyboards.back_to_admin)
     await state.clear()
 
 # кнопка "назад"
@@ -691,6 +693,40 @@ async def admin_back(callback: CallbackQuery):
         return
     
     await show_admin_panel(callback.message, user_id)
+    await callback.answer()
+
+
+@admin_router.callback_query(lambda c: c.data == "admin_manage")
+async def admin_manage(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("У вас нет прав администратора.", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "Выберите действие:",
+        reply_markup=keyboards.add_admin_keyboard
+    )
+    await callback.answer()
+    await state.clear()
+
+
+@admin_router.callback_query(lambda c: c.data == "admin_list")
+async def admin_list(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("У вас нет прав администратора.", show_alert=True)
+        return
+    
+    admins = storage.get_all_admins()
+    
+    if not admins:
+        text = "Список администраторов пуст."
+    else:
+        text = "Список администраторов:\n\n"
+        for i, admin in enumerate(admins, 1):
+            role = "Суперадмин" if admin.role == 'superadmin' else "Админ"
+            text += f"{i}. @{admin.username} (ID: {admin.user_id}) - {role}\n"
+    
+    await callback.message.answer(text, reply_markup=keyboards.add_admin_keyboard)
     await callback.answer()
 
 

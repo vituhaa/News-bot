@@ -74,18 +74,17 @@ def get_admin_settings_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Назад", callback_data="admin_back")]
     ])
 
-# Управление админами
-def get_admin_manage_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Добавить админа", callback_data="admin_add")],
-        [InlineKeyboardButton(text="Список админов", callback_data="admin_list")],
-        [InlineKeyboardButton(text="Назад", callback_data="admin_back")]
-    ])
-
 # Клавиатура для возврата в главн меню
 back_to_admin = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Назад", callback_data="admin_back")]
 ])
+
+add_admin_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text='Список текущих админов', callback_data="admin_list")],
+        [InlineKeyboardButton(text='Назад', callback_data="admin_back")]
+    ]
+)
 
 # ========== КЛАВИАТУРА СУПЕРАДМИНИСТРАТОРА ==========
 super_admin_keyboard = ReplyKeyboardMarkup(
@@ -96,5 +95,4 @@ super_admin_keyboard = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие",
-    one_time_keyboard=True
 )

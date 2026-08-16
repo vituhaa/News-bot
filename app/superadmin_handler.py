@@ -72,6 +72,11 @@ async def process_super_choice(message: Message, state: FSMContext):
         await message.answer(
             "Удаление администратора.\n\nВведите Telegram ID пользователя, которого нужно удалить:"
         )
+    elif message.text == "/admin" or message.text == "/start":
+        await message.answer(
+            "Вы ввели новую команду",
+            reply_markup=ReplyKeyboardRemove()
+        )
     else:
         await message.answer(
             "Неверная команда. Выберите из предложенных кнопок.",
