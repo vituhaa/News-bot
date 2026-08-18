@@ -1,5 +1,5 @@
 from aiogram import F, Router
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -22,7 +22,10 @@ class Questions(StatesGroup):
     files = State()
 
 class UserState(StatesGroup):
-    wait_for_choice = State() 
+    wait_for_choice = State()
+    make_another_news = State()
+    edit_revision_news = State()
+
 
 def check_input_type(message: Message) -> tuple[bool, str]:
     allowed = {
@@ -217,7 +220,7 @@ async def files_done(message: Message, state: FSMContext):
         reply_markup=keyboards.edit_news_keyboard
     )
 
-
+""" - стар верс
 @user_router.message(UserState.wait_for_choice)
 async def edit_or_submit(message: Message, state: FSMContext):
     if message.text == "Редактировать":
@@ -253,8 +256,6 @@ async def edit_or_submit(message: Message, state: FSMContext):
 
         if document:
             media_ids.append(document["file_id"])
-            # media_ids.append(document["file_type"])
-            # media_ids.append(document["file_name"])
 
         if not all([topic, text, category]):
             await message.answer("Ошибка: не все данные заполнены. Начните заново /start")
@@ -294,10 +295,11 @@ async def edit_or_submit(message: Message, state: FSMContext):
                 logger.error(f"Не удалось отправить уведомление админу {admin.user_id}: {e}")
 
 
-        await state.clear()
+        # await state.clear()
+        await state.set_state(UserState.make_another_news)
         await message.answer(
-            f"Готово! Новость отправлена на валидацию (ID #{saved_post.id}).",
-            reply_markup=ReplyKeyboardRemove()
+            f"Готово! Новость отправлена на валидацию (ID #{saved_post.id}).\nХотите создать ещё одну?",
+            reply_markup=keyboards.make_another_news_keyboard
         )
 
     else:
@@ -305,3 +307,189 @@ async def edit_or_submit(message: Message, state: FSMContext):
             "Используйте кнопки клавиатуры.",
             reply_markup=keyboards.edit_news_keyboard
         )
+"""
+async def notify_admins_about_post(bot, post, is_update: bool = False):
+    #Отправляет уведомление всем администраторам о новом или обновлённом посте.
+    admins = storage.get_all_admins()
+    action = "Обновлена" if is_update else "Новая"
+    for admin in admins:
+        try:
+            await bot.send_message(
+                admin.user_id,
+                f"❗️ {action} новость от @{post.username or 'пользователь'} (ID: {post.user_id}):\n"
+                f"Заголовок: {post.topic}\n"
+                f"Для обработки нажмите /review {post.id}"
+            )
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление админу {admin.user_id}: {e}")
+
+
+@user_router.message(UserState.wait_for_choice)
+async def edit_or_submit(message: Message, state: FSMContext):
+    if message.text == "Редактировать":
+        data = await state.get_data()
+        await state.clear()
+        # сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
+        await state.update_data(data)
+        await message.answer("Редактируем... Начните с названия.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Пункт 1. Название вашей новости (до 200 символов):")
+        await state.set_state(Questions.topic)
+
+    elif message.text == "Отправить":
+        data = await state.get_data()
+        photos = data.get("photos", [])
+        document = data.get("document")
+
+        topic = data.get('topic')
+        text = data.get('text')
+        category = data.get('category')
+        edit_post_id = data.get('edit_post_id')  # если происходит редактирование, здесь будет ID поста
+
+        media_ids = []
+        media_types = []
+        media_names = []
+
+        for photo_id in photos:
+            media_ids.append(photo_id)
+            media_types.append("photo")
+            media_names.append(None)
+
+        if document:
+            media_ids.append(document["file_id"])
+            media_types.append("document")
+            media_names.append(document.get("file_name", "document"))
+
+        if not all([topic, text, category]):
+            await message.answer("Ошибка: не все данные заполнены. Начните заново /start")
+            await state.clear()
+            return
+
+        if not media_ids:
+            await message.answer("Ошибка: необходимо прикрепить хотя бы одно медиа-вложение.")
+            return
+
+        # Если имеется edit_post_id, то это редактирование существующего поста
+        if edit_post_id:
+            post = storage.get_post(edit_post_id)
+            if not post:
+                await message.answer("Ошибка: пост для редактирования не найден. Попробуйте заново /start")
+                await state.clear()
+                return
+
+            # Обновляем все поля и сбрасываем модерацию
+            success = storage.update_post(
+                edit_post_id,
+                topic=topic,
+                text=text,
+                category=category,
+                media_ids=media_ids,
+                media_types=media_types,
+                media_names=media_names,
+                status='pending',          # возвращаем на модерацию
+                taken_by=None,             
+                taken_at=None,
+                moderated_by=None,
+                moderated_at=None,
+                comment=None               # очищаем комментарий модератора
+            )
+            if not success:
+                await message.answer("Ошибка при обновлении поста. Попробуйте заново.")
+                await state.clear()
+                return
+
+            saved_post = storage.get_post(edit_post_id)
+            if not saved_post:
+                await message.answer("Ошибка: не удалось получить обновлённый пост.")
+                await state.clear()
+                return
+
+            await state.update_data(edit_post_id=None)
+            await notify_admins_about_post(message.bot, saved_post, is_update=True)
+
+            await state.set_state(UserState.make_another_news)
+            await message.answer(
+                f"✅ Новость #{saved_post.id} обновлена и отправлена на модерацию.\nХотите создать ещё одну?",
+                reply_markup=keyboards.make_another_news_keyboard
+            )
+
+        else:
+            # Создание нового поста
+            post = Post(
+                user_id=message.from_user.id,
+                username=message.from_user.username or f"id_{message.from_user.id}",
+                topic=topic,
+                text=text,
+                category=category,
+                media_ids=media_ids,
+                media_types=media_types,
+                media_names=media_names,
+                status="pending"
+            )
+            saved_post = storage.create_post(post)
+            await notify_admins_about_post(message.bot, saved_post, is_update=False)
+
+            await state.set_state(UserState.make_another_news)
+            await message.answer(
+                f"Готово! Новость отправлена на валидацию (ID #{saved_post.id}).\nХотите создать ещё одну?",
+                reply_markup=keyboards.make_another_news_keyboard
+            )
+
+    else:
+        await message.answer(
+            "Используйте кнопки клавиатуры.",
+            reply_markup=keyboards.edit_news_keyboard
+        )
+
+@user_router.message(UserState.make_another_news)
+async def make_another_news_func(message: Message, state: FSMContext):
+    if message.text == "Да":
+        await message.answer("Создаём ещё одну новость...")
+        await state.clear()
+        await start_command(message, state)
+    elif message.text == "Нет":
+        await state.clear()
+        await message.answer(
+            "Все новости отправлены. Приходите снова, если захотить создать новость (команда /start).",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    else:
+        await message.answer(
+            "Используйте кнопки клавиатуры.",
+            reply_markup=keyboards.make_another_news_keyboard
+        )
+
+
+@user_router.message(UserState.edit_revision_news)
+async def edit_news(message: Message, state: FSMContext):
+    if message.text == "Изменить новость":
+        # возвращаемся к первому шагу с сохранёнными данными
+        data = await state.get_data()
+
+        post_id = data.get('pending_edit_post_id')
+        post_topic = data.get('pending_edit_topic')
+        post_text = data.get('pending_edit_text')
+        post_files = data.get('pending_edit_files', [])
+        moderator_comment = data.get('pending_edit_comment')
+
+        # сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
+        await state.update_data(
+            edit_post_id=post_id,
+            edit_topic=post_topic,
+            edit_text=post_text,
+            edit_files=post_files,
+            edit_comment=moderator_comment
+        )
+        await message.answer(
+            f"Редактирование новости #{post_id}\n\n"
+            f"Комментарий модератора: {moderator_comment}\n"
+            f"Текущее название: {post_topic}\n\n"
+            f"Введите новое название (до 200 символов):",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.set_state(Questions.topic)
+    else:
+        await message.answer(
+            "Используйте кнопки клавиатуры.",
+            reply_markup=keyboards.edit_revision_button
+            )
+        

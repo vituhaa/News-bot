@@ -3,6 +3,8 @@ from maxapi.types import MessageCreated, CallbackQueryCreated
 from maxapi.filters.command import CommandStart, Command
 from maxapi.fsm import State, StatesGroup, FSMContext
 #from maxapi.keyboards import InlineKeyboardMarkup, InlineKeyboardButton
+from maxapi.types import InputMediaPhoto
+
 from app_max.max_keyboards import (  # импортируем клавиатуры
     get_category_keyboard,
     get_done_keyboard,
@@ -181,7 +183,13 @@ async def files_done(callback: CallbackQueryCreated, state: FSMContext):
     await callback.message.answer(result)
 
     if photos:
-        await callback.message.answer_photo(photo=photos[0])
+        # Создаём список объектов InputMediaPhoto для всех фото
+        media_group = [InputMediaPhoto(media=photo_id) for photo_id in photos]
+        # Отправляем все фото одной группой
+        await callback.bot.send_media_group(
+            chat_id=callback.message.chat.id,
+            media=media_group
+        )
     elif document:
         await callback.message.answer_document(document=document["file_id"])
 

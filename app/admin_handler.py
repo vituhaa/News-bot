@@ -8,12 +8,15 @@ from aiogram import Bot
 from datetime import datetime
 import logging
 import json
+import zipfile
+import io
 import os
 import re
 from dotenv import load_dotenv
 
 from app.storage import storage
 from app.models import Post, Admin
+from app.student_handler import UserState
 import app.keyboards as keyboards
 
 load_dotenv()
@@ -109,8 +112,10 @@ async def show_admin_panel(message: Message, user_id: int):
     else:
         text += "Канал не настроен\n"
 
+    await message.answer("Подключаем клавиатуру администратора...", reply_markup=ReplyKeyboardRemove())
     keyboard = keyboards.get_admin_main_keyboard(pending_posts)
     await message.answer(text, reply_markup=keyboard)
+
 
 # так как администраторы должны иметь возможность перейти к заявке по ID:
 @admin_router.message(Command("review"))
@@ -237,8 +242,6 @@ async def show_post_to_admin(message: Message, post: Post, progress: str = "", s
                 parse_mode='HTML' if caption else None
             )
 
-    # await message.answer(text, reply_markup=keyboard)
-
 
 @admin_router.callback_query(lambda c: c.data.startswith("approve_"))
 async def approve_post(callback: CallbackQuery):
@@ -253,7 +256,7 @@ async def approve_post(callback: CallbackQuery):
         await callback.answer("Пост не найден", show_alert=True)
         return
 
-    if post.status == 'pending' and post.taken_by and post.taken_by != user_id:
+    if post.taken_by and post.taken_by != user_id:
         admin = storage.get_admin(post.taken_by)
         admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
         await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
@@ -366,6 +369,9 @@ async def approve_post(callback: CallbackQuery):
             logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
         #
 
+        # Показываем панель администратора
+        await show_admin_panel(callback.message, user_id)
+
         await callback.answer("Новость одобрена!")
     else:
         await callback.answer("Сначала укажите канал в настройках.")
@@ -385,7 +391,7 @@ async def revision_post(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Пост не найден", show_alert=True)
         return
 
-    if post.status == 'pending' and post.taken_by and post.taken_by != user_id:
+    if post.taken_by and post.taken_by != user_id:
         admin = storage.get_admin(post.taken_by)
         admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
         await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
@@ -397,13 +403,12 @@ async def revision_post(callback: CallbackQuery, state: FSMContext):
     await state.update_data(post_id=post_id)
     await state.set_state(AdminState.wait_for_comment)
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         f"Возврат новости #{post_id} на доработку.\nНапишите комментарий для автора (что нужно исправить):"
     )
     await callback.answer()
 
 
-# удалим код выше с прошлой логикой отклонения после теста новой  (ниже)
 @admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
 async def reject_post(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
@@ -425,7 +430,7 @@ async def reject_post(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Пост не найден", show_alert=True)
         return
 
-    if post.status == 'pending' and post.taken_by and post.taken_by != user_id:
+    if post.taken_by and post.taken_by != user_id:
         admin = storage.get_admin(post.taken_by)
         admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
         await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
@@ -488,13 +493,14 @@ async def process_reject_comment(message: Message, state: FSMContext):
 
     await message.answer(f"✅ Новость #{post_id} отклонена. Причина отправлена автору.")
 
-    pending_posts = storage.get_pending_posts()
+    """pending_posts = storage.get_pending_posts()
     pending_count = len(pending_posts)
-    await message.answer("Панель администратора:", reply_markup=keyboards.get_admin_main_keyboard(pending_count))
+    await message.answer("Панель администратора:", reply_markup=keyboards.get_admin_main_keyboard(pending_count))"""
+    # вызываем панель администратора (с удалением старой клавиатуры)
+    await show_admin_panel(message, user_id)
 
     await state.clear()
 
-#-----------------------------------------------------------------------------------------конец для новой логики отклонения тут.
 
 @admin_router.callback_query(lambda c: c.data.startswith("confirm_reject_"))
 async def confirm_rejecting_post(callback: CallbackQuery, state: FSMContext):
@@ -560,35 +566,74 @@ async def cancel_rejecting_post(callback: CallbackQuery):
         f"Отмена отклонения поста #{post_id}\n\n"
         f"Пост возвращен на модерацию."
     )
-    pending_posts = storage.get_pending_posts()
+    """pending_posts = storage.get_pending_posts()
     pending_count = len(pending_posts)
     
-    await callback.message.answer("Панель администратора: ", reply_markup=keyboards.get_admin_main_keyboard(pending_count))
+    await callback.message.answer("Панель администратора: ", reply_markup=keyboards.get_admin_main_keyboard(pending_count))"""
+    # Показываем панель администратора
+    await show_admin_panel(callback.message, user_id)
 
 
-@admin_router.callback_query(lambda c: c.data.startswith("export_"))
-async def export_post(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    if not is_admin(user_id):
-        await callback.answer("У вас нет прав администратора.", show_alert=True)
-        return
+# ЭКСПОРТ
+# @admin_router.callback_query(lambda c: c.data.startswith("export_"))
+# async def export_post(callback: CallbackQuery):
+#     user_id = callback.from_user.id
+#     if not is_admin(user_id):
+#         await callback.answer("У вас нет прав администратора.", show_alert=True)
+#         return
 
-    post_id = int(callback.data.split('_')[1])
-    post = storage.get_post(post_id)
-    if not post:
-        await callback.answer("Пост не найден", show_alert=True)
-        return
+#     post_id = int(callback.data.split('_')[1])
+#     post = storage.get_post(post_id)
+#     if not post:
+#         await callback.answer("Пост не найден", show_alert=True)
+#         return
 
-    data = post.to_dict()
-    json_str = json.dumps(data, ensure_ascii=False, indent=2)
-    file = BufferedInputFile(json_str.encode('utf-8'),
-                             filename = f"post_{post_id}.json")
+#     zip_data = io.Bytes.IO()
+#     with zipfile.ZipFile(zip_data, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+#         data = post.to_dict()
+#         json_str = json.dumps(data, ensure_ascii=False, indent=2)
+#         zip_file.writestr(f"post_{post_id}.json", json_str.encode('utf-8'))
 
-    await callback.message.answer_document(
-        document=file,
-        caption=f"Выгрузка новости #{post_id}"
-    )
-    await callback.answer("JSON выгружен!")
+#         media_files = await download_post(post, post_id)
+#         for filename, file_data in media_files.items():
+#             zip_file.writestr(f"media/{filename}", file_data)
+
+#     zip_data.seek(0)
+#     zip_file = BufferedInputFile(zip_data.getvalue(), filename=f"post_{post_id}.zip")
+
+#     await callback.message.answer_document(
+#         document=zip_file,
+#         caption=f"Выгрузка новости #{post_id}"
+#     )
+#     await callback.answer("Архив выгружен!")
+
+
+# async def download_post(post, post_id):
+#     files_dict = {}
+
+#     if hasattr(post, 'photo') and post.photo:
+#         for i, photo_size in enumerate(post.photo):
+#             file_id = photo_size[-1].file_id
+#             file_data = await download_file(file_id)
+#             if file_data:
+#                 file_name = f"photo_{i + 1}.jpg"
+#                 files_dict[file_name] = file_data
+
+#     if hasattr(post, 'document') and post.document:
+#         file_data = await download_file(post.document.file_id)
+#         if file_data:
+#             file_name = post.document.file_name
+#             files_dict[file_name] = file_data
+
+
+# async def download_file(file_id):
+#     try:
+#         file_info = await bot.get_file(file_id)
+#         file_content = await bot.download_file(file_info.file_path)
+#         return file_content
+#     except Exception as e:
+#         print("Ошибка при скачивании файла: {e}")
+#         return
 
 
 @admin_router.message(AdminState.wait_for_comment)
@@ -612,6 +657,15 @@ async def process_comment(message: Message, state: FSMContext):
         await message.answer("Пост не найден")
         await state.clear()
         return
+    
+    await state.update_data(
+        pending_edit_post_id=post.id,
+        pending_edit_topic=post.topic,
+        pending_edit_text=post.text,
+        pending_edit_files=post.files if hasattr(post, 'files') else [],
+        pending_edit_comment=comment,
+        pending_edit_user_id=post.user_id
+    )
 
     storage.update_post(
         post_id,
@@ -620,6 +674,7 @@ async def process_comment(message: Message, state: FSMContext):
         moderated_at=datetime.now(),
         comment=comment
     )
+    await state.set_state(UserState.edit_revision_news)
 
     # Отсылаем уведомление студенту о возврате на доработку
     try:
@@ -627,14 +682,17 @@ async def process_comment(message: Message, state: FSMContext):
             post.user_id,
             f"🔗 Ваша новость \"{post.topic}\" требует правок. "
             f"Комментарий модератора: {comment}. "
-            f"Исправьте, нажав кнопку ниже."
+            f"Исправьте, нажав кнопку ниже.",
+            reply_markup=keyboards.edit_revision_button
         )
     except Exception as e:
         logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
-    #
 
     await message.answer(f"Новость #{post_id} возвращена автору.\nКомментарий: {comment}")
-    await state.clear()
+
+    # Показываем панель администратора
+    await show_admin_panel(message, user_id)
+
 
 # кнопка "настройки" для админа
 @admin_router.callback_query(lambda c: c.data == "admin_settings")

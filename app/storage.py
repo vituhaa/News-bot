@@ -64,12 +64,11 @@ class Storage:
     def get_pending_posts(self) -> List[Post]:
         """Посты на модерации (pending + revision)"""
         pending = self.get_all_posts(status='pending')
-        revision = self.get_all_posts(status='revision')
         
         # Проверим, что это объекты Post
         for p in pending:
             print(f"[DEBUG] Пост {p.id}: {p.status} ({type(p)})")
-        return pending + revision
+        return pending
 
     def update_post(self, post_id: int, **kwargs) -> bool:
         if post_id not in self._posts:

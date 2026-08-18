@@ -8,6 +8,9 @@ from app_max.max_student_handler import user_router
 
 load_dotenv()
 
+from max_admin_handler import admin_router
+dp.include_router(admin_router)
+
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")  # токен в .env! после получения
 
 logging.basicConfig(level=logging.INFO)

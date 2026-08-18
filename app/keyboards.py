@@ -10,7 +10,7 @@ edit_news_keyboard = ReplyKeyboardMarkup(keyboard=[
     input_field_placeholder="Выберите действие",
     one_time_keyboard=True)
 
-make_another_news = ReplyKeyboardMarkup(keyboard=[
+make_another_news_keyboard = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="Да"), KeyboardButton(text="Нет")]],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие")
@@ -28,6 +28,15 @@ category_keyboard = ReplyKeyboardMarkup(keyboard=[
 
 done_keyboard = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='Готово')]],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
+
+# для редактирования после revision
+edit_revision_button = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text='Изменить новость')],
+    ],
     resize_keyboard=True,
     one_time_keyboard=True
 )

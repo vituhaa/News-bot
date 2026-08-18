@@ -2,7 +2,8 @@ from datetime import datetime
 from typing import Optional, Literal, List
 
 # Типы статусов
-PostStatus = Literal['pending', 'in_progress', 'published', 'rejected', 'returned', 'draft']
+# PostStatus = Literal['pending', 'in_progress', 'published', 'rejected', 'returned', 'draft']
+PostStatus = Literal['pending', 'revision', 'published', 'rejected', 'draft', 'approved']
 UserRole = Literal['superadmin', 'admin']
 
 # Модель новости
