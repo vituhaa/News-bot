@@ -613,27 +613,34 @@ async def export_post(callback: CallbackQuery):
 
 async def download_post(post, post_id):
     files_dict = {}
+    extentions = {
+        'photo': '.jpg', 
+        'photo': '.png',
+        'document': '.docx', 
+        'document': '.pdf'
+    }
+    media_types = post.media_types
+    media_ids = post.media_ids
+    media_names = post.media_names or [f"file_{i + 1}" for i in range(len(media_ids))]
 
-    if hasattr(post, 'photo') and post.photo:
-        for i, photo_size in enumerate(post.photo):
-            file_id = photo_size[-1].file_id
-            file_data = await download_file(file_id)
-            if file_data:
-                file_name = f"photo_{i + 1}.jpg"
-                files_dict[file_name] = file_data
-
-    if hasattr(post, 'document') and post.document:
-        file_data = await download_file(post.document.file_id)
+    for file_id, media_type, media_name in zip(media_ids, media_types, media_names):
+        file_data = await download_file(file_id)
         if file_data:
-            file_name = post.document.file_name
-            files_dict[file_name] = file_data
+            ext = extentions.get(media_type)
+            if media_name:
+                filename = media_name
+            else:
+                filename = f"{media_type}_{len(files_dict) + 1}{ext}"
+            files_dict[filename] = file_data
+
+    return files_dict
 
 
 async def download_file(file_id):
     try:
         file_info = await bot.get_file(file_id)
         file_content = await bot.download_file(file_info.file_path)
-        return file_content
+        return file_content.read()
     except Exception as e:
         print("Ошибка при скачивании файла: {e}")
         return
