@@ -347,7 +347,7 @@ async def approve_post(callback: CallbackQuery):
                 )
                 return
 
-        post_text = f"{post.topic} \n {post.text} \n Категория: {post.category}"
+        post_text = f"{post.topic} \n{post.text} \nКатегория:{post.category}"
 
         photos = []
         documents = []
@@ -366,6 +366,7 @@ async def approve_post(callback: CallbackQuery):
             else:
                 documents.append(media_id)
         if photos:
+            # photos = [photo["file_id"] for photo in photos]
             if len(photos) == 1:
                 sent = await bot.send_photo(
                     chat_id=chat_id,
@@ -379,7 +380,7 @@ async def approve_post(callback: CallbackQuery):
                 for i, photo_id in enumerate(photos):
                     if i == 0:
                         album.append(InputMediaPhoto(
-                            media=photo_id, 
+                            media=photo_id["file_id"], 
                             caption=post_text,
                             parse_mode='HTML'))
                     else:

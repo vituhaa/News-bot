@@ -227,7 +227,7 @@ async def files_done(message: Message, state: FSMContext):
 
     # предпросмотр фотографий:
     if len(photos) == 1:
-        await message.answer_photo(photo=photos[0])
+        await message.answer_photo(photo=photos[0]["file_id"])
     elif len(photos) > 1:
         builder = MediaGroupBuilder()
         for photo_id in photos:
