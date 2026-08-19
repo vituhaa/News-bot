@@ -23,10 +23,8 @@ import app.keyboards as keyboards
 _dispatcher = None
 
 def set_dispatcher(dp):
-    """Устанавливает диспетчер для использования в админ-роутере."""
     global _dispatcher
     _dispatcher = dp
-
 
 load_dotenv()
 
@@ -53,7 +51,14 @@ class AdminState(StatesGroup):
 
 # =========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===========
 def is_admin(user_id: int) -> bool:
-    return user_id in admins_list
+    admins = storage.get_all_admins()
+    admin_list = []
+    for admin in admins:
+        admin_list.append(int(admin.user_id))
+    if user_id in admin_list:
+        return True
+    else:
+        return False
 
 def init_admins(admins_ids):
     for admin_id in admins_ids:
@@ -126,6 +131,63 @@ async def show_admin_panel(message: Message, user_id: int):
     await message.answer(text, reply_markup=keyboard)
 
 
+async def show_post_to_admin(message: Message, post: Post, progress: str = "", show_next: bool = True):
+    text = format_post_text(post)
+    if progress:
+        text = f"{progress}\n {text}"
+    keyboard = keyboards.get_admin_post_keyboard(post.id, show_next=show_next)
+
+    photos = []
+    documents = []
+
+    for i, media_id in enumerate(post.media_ids):
+        if i < len(post.media_types):
+            media_type = post.media_types[i]
+        else:
+            media_type = 'unknown'
+        
+        if media_type == 'photo':
+            photos.append(media_id["file_id"])
+        elif media_type == 'document':
+            documents.append(media_id)
+        else:
+            documents.append(media_id)
+
+    if photos:
+        if len(photos) == 1:
+            await message.answer_photo(
+                photo=photos[0],
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        else:
+            album = []
+            for i, photo_id in enumerate(photos):
+                if i == 0:
+                    album.append(InputMediaPhoto(
+                        media=photo_id, 
+                        caption=text,
+                        parse_mode='HTML'))
+                else:
+                    album.append(InputMediaPhoto(media=photo_id))
+            await message.answer_media_group(media=album)
+            await message.answer("Действия с постом:", reply_markup=keyboard)
+
+
+    if documents:
+        for i, doc_id in enumerate(documents):
+            caption = text if not photos and i == 0 else None
+            reply_markup = keyboard if not photos and i == 0 else None
+            
+            await message.answer_document(
+                document=doc_id,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode='HTML' if caption else None
+            )
+
+
 # так как администраторы должны иметь возможность перейти к заявке по ID:
 @admin_router.message(Command("review"))
 async def review_post_by_id(message: Message):
@@ -192,64 +254,6 @@ async def admin_next(callback: CallbackQuery):
     show_next = (page + 1) < len(pending_posts)
     await show_post_to_admin(callback.message, post, progress=f"({page + 1} / {len(pending_posts)})", show_next=show_next)
     await callback.answer()
-
-
-async def show_post_to_admin(message: Message, post: Post, progress: str = "", show_next: bool = True):
-    text = format_post_text(post)
-    if progress:
-        text = f"{progress}\n {text}"
-    keyboard = keyboards.get_admin_post_keyboard(post.id, show_next=show_next)
-
-    photos = []
-    documents = []
-
-    for i, media_id in enumerate(post.media_ids):
-        if i < len(post.media_types):
-            media_type = post.media_types[i]
-        else:
-            media_type = 'unknown'
-        
-        if media_type == 'photo':
-            photos.append(media_id)
-        elif media_type == 'document':
-            documents.append(media_id)
-        else:
-            documents.append(media_id)
-
-    if photos:
-        if len(photos) == 1:
-            await message.answer_photo(
-                photo=photos[0],
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
-        else:
-            await message.answer_photo(
-                photo=photos[0],
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
-            if len(photos) > 1:
-                album = []
-                for photo_id in photos[1:]:
-                    album.append(InputMediaPhoto(media=photo_id))
-                
-                await message.answer_media_group(media=album)
-
-
-    if documents:
-        for i, doc_id in enumerate(documents):
-            caption = text if not photos and i == 0 else None
-            reply_markup = keyboard if not photos and i == 0 else None
-            
-            await message.answer_document(
-                document=doc_id,
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode='HTML' if caption else None
-            )
 
 
 @admin_router.callback_query(lambda c: c.data.startswith("approve_"))
@@ -345,42 +349,77 @@ async def approve_post(callback: CallbackQuery):
 
         post_text = f"{post.topic} \n {post.text} \n Категория: {post.category}"
 
-        if post.media_ids:
-            sent = await bot.send_photo(
-                chat_id=chat_id,
-                photo=post.media_ids[0],
-                caption=post_text,
-                parse_mode='HTML'
-            )
-        else:
-            sent = await bot.send_photo(
-                chat_id=chat_id,
-                caption=post_text,
-                parse_mode='HTML'
-            )
+        photos = []
+        documents = []
+        sent_list = []
 
-        storage.update_post(
-            post_id,
-            status='published',
-            moderated_by=user_id,
-            moderated_at=datetime.now(),
-            channel_message_id=sent.message_id,
-            channel_post_url=sent.get_url()
-        )
+        for i, media_id in enumerate(post.media_ids):
+            if i < len(post.media_types):
+                media_type = post.media_types[i]
+            else:
+                media_type = 'unknown'
+            
+            if media_type == 'photo':
+                photos.append(media_id["file_id"])
+            elif media_type == 'document':
+                documents.append(media_id)
+            else:
+                documents.append(media_id)
+        if photos:
+            if len(photos) == 1:
+                sent = await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photos[0],
+                    caption=post_text,
+                    parse_mode='HTML'
+                )
+                sent_list.append(sent)
+            else:
+                album = []
+                for i, photo_id in enumerate(photos):
+                    if i == 0:
+                        album.append(InputMediaPhoto(
+                            media=photo_id, 
+                            caption=post_text,
+                            parse_mode='HTML'))
+                    else:
+                        album.append(InputMediaPhoto(media=photo_id))
+                sent = await bot.send_media_group(chat_id=chat_id,
+                                                media=album)
+                sent_list.extend(sent)
+
+        if documents:
+            for i, doc_id in enumerate(documents):
+                caption = post_text if not photos and i == 0 else None
+                
+                sent = await bot.send_document(
+                    chat_id=chat_id,
+                    document=doc_id,
+                    caption=caption,
+                    parse_mode='HTML' if caption else None
+                )
+                sent_list.append(sent)
+
+        if sent_list:
+            storage.update_post(
+                post_id,
+                status='published',
+                moderated_by=user_id,
+                moderated_at=datetime.now(),
+                channel_message_id=sent_list[0].message_id,
+                channel_post_url=sent_list[0].get_url()
+            )
 
         # Отсылаем уведомление студенту при публикации
         try:
             await bot.send_message(
                 post.user_id,
-                f"✅ Ваша новость опубликована! Смотреть: {sent.get_url()}"
+                f"✅ Ваша новость опубликована! Смотреть: {sent_list[0].get_url()}"
             )
         except Exception as e:
             logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
-        #
 
-        # Показываем панель администратора
         await show_admin_panel(callback.message, user_id)
-
         await callback.answer("Новость одобрена!")
     else:
         await callback.answer("Сначала укажите канал в настройках.")
@@ -620,7 +659,7 @@ async def download_post(post, post_id):
         'document': '.pdf'
     }
     media_types = post.media_types
-    media_ids = post.media_ids
+    media_ids = [media['file_id'] for media in post.media_ids]
     media_names = post.media_names or [f"file_{i + 1}" for i in range(len(media_ids))]
 
     for file_id, media_type, media_name in zip(media_ids, media_types, media_names):

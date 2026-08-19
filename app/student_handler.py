@@ -1,4 +1,6 @@
 from aiogram import F, Router
+import asyncio
+from collections import defaultdict
 from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
@@ -51,18 +53,22 @@ async def start_command(message: Message, state: FSMContext):
         "Для создания новости заполните форму:",
         reply_markup=ReplyKeyboardRemove()
     )
-    await message.answer("Пункт 1. Название вашей новости (до 200 символов):")
+    await message.answer("Пункт 1. Название вашей новости (до 200 символов):", reply_markup=keyboards.end)
     await state.set_state(Questions.topic)
 
 
 @user_router.message(Questions.topic)
 async def type_text(message: Message, state: FSMContext):
+    if message.text == "Отменить":
+        await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+        return
     if message.content_type == "text":
         if len(message.text) > 200:
             await message.answer("Слишком длинный текст, максимальная длина - 200 символов. Попробуйте снова.")
             return
         await state.update_data(topic=message.text)
-        await message.answer("Пункт 2. Текст вашей новости:")
+        await message.answer("Пункт 2. Текст вашей новости:", reply_markup=keyboards.end)
         await state.set_state(Questions.text)
     else:
         await message.answer("Неверный ввод! Дайте текстовое название вашей новости.")
@@ -71,6 +77,10 @@ async def type_text(message: Message, state: FSMContext):
 
 @user_router.message(Questions.text)
 async def type_tags(message: Message, state: FSMContext):
+    if message.text == "Отменить":
+        await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+        return
     if message.content_type == "text":
         await state.update_data(text=message.text)
         await message.answer(
@@ -85,6 +95,11 @@ async def type_tags(message: Message, state: FSMContext):
 
 @user_router.message(Questions.tags)
 async def choose_tags(message: Message, state: FSMContext):
+    if message.text == "Отменить":
+        await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+        return
+    
     allowed = ['Мероприятие', 'Стипендия', 'Спорт', 'Обучение']
     if message.text not in allowed:
         await message.answer(
@@ -101,44 +116,53 @@ async def choose_tags(message: Message, state: FSMContext):
     await state.set_state(Questions.files)
 
 
-@user_router.message(F.photo, ~F.media_group_id, StateFilter(Questions.files))
-async def single_photo_handler(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-    if len(photos) >= 10:
-        await message.answer("Нельзя отправлять более 10 фотографий!", reply_markup=keyboards.done_keyboard)
-        return
+photo_lock = defaultdict(asyncio.Lock)
+tasks = {}
 
-    photos.append(message.photo[-1].file_id)
+@user_router.message(F.photo,StateFilter(Questions.files))
+async def photo_handler(message: Message, state: FSMContext):
+    key = (message.chat.id, message.from_user.id)
 
-    await state.update_data(photos=photos)
-    await message.answer("Фотографии приняты!", reply_markup=keyboards.done_keyboard)
+    async with photo_lock[key]:
+        data = await state.get_data()
+        photos = data.get("photos", [])
+
+        photos.append({
+            "message_id": message.message_id,
+            "file_id": message.photo[-1].file_id,
+            "media_group_id": message.media_group_id,
+        } )
+        photos.sort(key=lambda x: x["message_id"])
+        await state.update_data(photos=photos)
+
+        old_task = tasks.get(key)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        tasks[key] = asyncio.create_task(finish_photo_batch(message, state, key))
 
 
-@user_router.message(F.photo, F.media_group_id, StateFilter(Questions.files))
-@media_group_handler
-async def album_handler(messages: list[Message], state: FSMContext):
-    photos = [x.photo[-1].file_id for x in messages if x.photo]
-    data = await state.get_data()
-    received = data.get("photos", [])
-    diff = 10 - len(received)
+async def finish_photo_batch(message: Message, state:FSMContext, key):
+    try:
+        await asyncio.sleep(0.5)
 
-    if diff <= 0:
-        await messages[0].answer("Нельзя отправлять более 10 фотографий! Остальные прикреплённые фотографии были удалены.",
+        async with photo_lock[key]:
+            data = await state.get_data()
+            photos = data.get("photos", [])
+            # photos.sort(key=lambda x: x["message_id"])
+            if len(photos) > 10:
+                photos = photos[:10]
+                await state.update_data(photos=photos)
+                await message.answer("Нельзя отправлять более 10 фотографий! Остальные прикреплённые фотографии были удалены.",
                                  reply_markup=keyboards.done_keyboard)
-        return
-    
-    accepted_photos = photos[:diff]
+            else:
+                await message.answer("Фотографии приняты!", reply_markup=keyboards.done_keyboard)
 
-    await state.update_data(
-        photos=received + accepted_photos
-    )
-
-    if len(photos) > diff:
-        await messages[0].answer("Нельзя отправлять более 10 фотографий! Остальные прикреплённые фотографии были удалены.",
-                                 reply_markup=keyboards.done_keyboard)
-    
-    await messages[0].answer("Фотографии приняты!", reply_markup=keyboards.done_keyboard)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        if key in tasks:
+            del tasks[key]
 
 
 @user_router.message(F.document, ~F.media_group_id, StateFilter(Questions.files))
@@ -171,8 +195,12 @@ async def files_album_handler(messages: list[Message], state: FSMContext):
     await messages[0].answer("Можно прикрепить только один документ формата PDF или DOCX.", reply_markup=keyboards.done_keyboard)
 
 
-@user_router.message(F.text == "Готово", StateFilter(Questions.files))
+@user_router.message(F.text.in_({"Готово", "Отменить"}), StateFilter(Questions.files))
 async def files_done(message: Message, state: FSMContext):
+    if message.text == "Отменить":
+        await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+        return
     data = await state.get_data()
 
     photos = data.get("photos", [])
@@ -203,7 +231,7 @@ async def files_done(message: Message, state: FSMContext):
     elif len(photos) > 1:
         builder = MediaGroupBuilder()
         for photo_id in photos:
-            builder.add_photo(media=photo_id)
+            builder.add_photo(media=photo_id["file_id"])
         
         await message.answer_media_group(
             media=builder.build()
@@ -239,7 +267,12 @@ async def notify_admins_about_post(bot, post, is_update: bool = False):
 
 @user_router.message(UserState.wait_for_choice)
 async def edit_or_submit(message: Message, state: FSMContext):
-    if message.text == "Редактировать":
+    if message.text == "Отменить":
+        await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+        return
+    
+    elif message.text == "Редактировать":
         data = await state.get_data()
         await state.clear()
         # сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали

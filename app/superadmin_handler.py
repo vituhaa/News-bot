@@ -5,7 +5,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram import Bot
-from datetime import datetime
 import logging
 import os
 from dotenv import load_dotenv
@@ -64,7 +63,7 @@ async def process_super_choice(message: Message, state: FSMContext):
             text = "Список администраторов:\n"
             for i, admin in enumerate(admins, 1):
                 role = "Суперадмин" if admin.role == 'superadmin' else "Админ"
-                text += f"{i}. @{admin.username} (ID: {admin.user_id}) - {role}\n"
+                text += f"{i}. ID: {admin.user_id} - {role}\n"
         await message.answer(text, reply_markup=keyboards.super_admin_keyboard)
         # await state.clear()
     elif message.text == "Удалить админа":

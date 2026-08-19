@@ -5,7 +5,7 @@ from aiogram.types import (ReplyKeyboardMarkup, KeyboardButton,
 
 # ========== КЛАВИАТУРА ПОЛЬЗОВАТЕЛЯ ==========
 edit_news_keyboard = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="Отправить"), KeyboardButton(text="Редактировать")]],
+    [KeyboardButton(text="Отправить"), KeyboardButton(text="Редактировать")], [KeyboardButton(text='Отменить')]],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие",
     one_time_keyboard=True)
@@ -20,14 +20,16 @@ category_keyboard = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='Мероприятие')],
     [KeyboardButton(text='Стипендия')],
     [KeyboardButton(text='Спорт')],
-    [KeyboardButton(text='Обучение')]],
+    [KeyboardButton(text='Обучение')],
+    [KeyboardButton(text='Отменить')]],
     resize_keyboard=True,
     input_field_placeholder="Выберите категорию",
     one_time_keyboard=True
 )
 
 done_keyboard = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text='Готово')]],
+    [KeyboardButton(text='Готово')],
+    [KeyboardButton(text='Отменить')]],
     resize_keyboard=True,
     one_time_keyboard=True
 )
@@ -36,6 +38,15 @@ done_keyboard = ReplyKeyboardMarkup(keyboard=[
 edit_revision_button = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text='Изменить новость')],
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
+
+# отмена создания новости
+end = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text='Отменить')],
     ],
     resize_keyboard=True,
     one_time_keyboard=True
