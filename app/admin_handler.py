@@ -19,6 +19,15 @@ from app.models import Post, Admin
 from app.student_handler import UserState
 import app.keyboards as keyboards
 
+# Глобальная переменная для хранения диспетчера
+_dispatcher = None
+
+def set_dispatcher(dp):
+    """Устанавливает диспетчер для использования в админ-роутере."""
+    global _dispatcher
+    _dispatcher = dp
+
+
 load_dotenv()
 
 admin_router = Router()
@@ -493,9 +502,6 @@ async def process_reject_comment(message: Message, state: FSMContext):
 
     await message.answer(f"✅ Новость #{post_id} отклонена. Причина отправлена автору.")
 
-    """pending_posts = storage.get_pending_posts()
-    pending_count = len(pending_posts)
-    await message.answer("Панель администратора:", reply_markup=keyboards.get_admin_main_keyboard(pending_count))"""
     # вызываем панель администратора (с удалением старой клавиатуры)
     await show_admin_panel(message, user_id)
 
@@ -566,74 +572,71 @@ async def cancel_rejecting_post(callback: CallbackQuery):
         f"Отмена отклонения поста #{post_id}\n\n"
         f"Пост возвращен на модерацию."
     )
-    """pending_posts = storage.get_pending_posts()
-    pending_count = len(pending_posts)
     
-    await callback.message.answer("Панель администратора: ", reply_markup=keyboards.get_admin_main_keyboard(pending_count))"""
     # Показываем панель администратора
     await show_admin_panel(callback.message, user_id)
 
 
 # ЭКСПОРТ
-# @admin_router.callback_query(lambda c: c.data.startswith("export_"))
-# async def export_post(callback: CallbackQuery):
-#     user_id = callback.from_user.id
-#     if not is_admin(user_id):
-#         await callback.answer("У вас нет прав администратора.", show_alert=True)
-#         return
+@admin_router.callback_query(lambda c: c.data.startswith("export_"))
+async def export_post(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
+        await callback.answer("У вас нет прав администратора.", show_alert=True)
+        return
 
-#     post_id = int(callback.data.split('_')[1])
-#     post = storage.get_post(post_id)
-#     if not post:
-#         await callback.answer("Пост не найден", show_alert=True)
-#         return
+    post_id = int(callback.data.split('_')[1])
+    post = storage.get_post(post_id)
+    if not post:
+        await callback.answer("Пост не найден", show_alert=True)
+        return
 
-#     zip_data = io.Bytes.IO()
-#     with zipfile.ZipFile(zip_data, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-#         data = post.to_dict()
-#         json_str = json.dumps(data, ensure_ascii=False, indent=2)
-#         zip_file.writestr(f"post_{post_id}.json", json_str.encode('utf-8'))
+    zip_data = io.BytesIO()
+    with zipfile.ZipFile(zip_data, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        data = post.to_dict()
+        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+        zip_file.writestr(f"post_{post_id}.json", json_str.encode('utf-8'))
 
-#         media_files = await download_post(post, post_id)
-#         for filename, file_data in media_files.items():
-#             zip_file.writestr(f"media/{filename}", file_data)
+        media_files = await download_post(post, post_id)
+        for filename, file_data in media_files.items():
+            zip_file.writestr(f"media/{filename}", file_data)
 
-#     zip_data.seek(0)
-#     zip_file = BufferedInputFile(zip_data.getvalue(), filename=f"post_{post_id}.zip")
+    zip_data.seek(0)
+    zip_file = BufferedInputFile(zip_data.getvalue(), filename=f"post_{post_id}.zip")
 
-#     await callback.message.answer_document(
-#         document=zip_file,
-#         caption=f"Выгрузка новости #{post_id}"
-#     )
-#     await callback.answer("Архив выгружен!")
-
-
-# async def download_post(post, post_id):
-#     files_dict = {}
-
-#     if hasattr(post, 'photo') and post.photo:
-#         for i, photo_size in enumerate(post.photo):
-#             file_id = photo_size[-1].file_id
-#             file_data = await download_file(file_id)
-#             if file_data:
-#                 file_name = f"photo_{i + 1}.jpg"
-#                 files_dict[file_name] = file_data
-
-#     if hasattr(post, 'document') and post.document:
-#         file_data = await download_file(post.document.file_id)
-#         if file_data:
-#             file_name = post.document.file_name
-#             files_dict[file_name] = file_data
+    await callback.message.answer_document(
+        document=zip_file,
+        caption=f"Выгрузка новости #{post_id}"
+    )
+    await callback.answer("Архив выгружен!")
 
 
-# async def download_file(file_id):
-#     try:
-#         file_info = await bot.get_file(file_id)
-#         file_content = await bot.download_file(file_info.file_path)
-#         return file_content
-#     except Exception as e:
-#         print("Ошибка при скачивании файла: {e}")
-#         return
+async def download_post(post, post_id):
+    files_dict = {}
+
+    if hasattr(post, 'photo') and post.photo:
+        for i, photo_size in enumerate(post.photo):
+            file_id = photo_size[-1].file_id
+            file_data = await download_file(file_id)
+            if file_data:
+                file_name = f"photo_{i + 1}.jpg"
+                files_dict[file_name] = file_data
+
+    if hasattr(post, 'document') and post.document:
+        file_data = await download_file(post.document.file_id)
+        if file_data:
+            file_name = post.document.file_name
+            files_dict[file_name] = file_data
+
+
+async def download_file(file_id):
+    try:
+        file_info = await bot.get_file(file_id)
+        file_content = await bot.download_file(file_info.file_path)
+        return file_content
+    except Exception as e:
+        print("Ошибка при скачивании файла: {e}")
+        return
 
 
 @admin_router.message(AdminState.wait_for_comment)
@@ -658,15 +661,6 @@ async def process_comment(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    await state.update_data(
-        pending_edit_post_id=post.id,
-        pending_edit_topic=post.topic,
-        pending_edit_text=post.text,
-        pending_edit_files=post.files if hasattr(post, 'files') else [],
-        pending_edit_comment=comment,
-        pending_edit_user_id=post.user_id
-    )
-
     storage.update_post(
         post_id,
         status='revision',
@@ -674,8 +668,6 @@ async def process_comment(message: Message, state: FSMContext):
         moderated_at=datetime.now(),
         comment=comment
     )
-    await state.set_state(UserState.edit_revision_news)
-
     # Отсылаем уведомление студенту о возврате на доработку
     try:
         await bot.send_message(
@@ -685,13 +677,28 @@ async def process_comment(message: Message, state: FSMContext):
             f"Исправьте, нажав кнопку ниже.",
             reply_markup=keyboards.edit_revision_button
         )
+        from aiogram.fsm.storage.base import StorageKey
+        from aiogram.fsm.context import FSMContext
+        
+        storage_key = StorageKey(bot_id=bot.id, user_id=post.user_id, chat_id=post.user_id)
+        student_context = FSMContext(storage=_dispatcher.storage, key=storage_key)
+        await student_context.set_state(UserState.edit_revision_news)
+        await student_context.update_data(
+            pending_edit_post_id=post.id,
+            pending_edit_topic=post.topic,
+            pending_edit_text=post.text,
+            # pending_edit_files=[] if hasattr(post, 'files') else post.files,
+            pending_edit_comment=comment,
+            # pending_edit_user_id=post.user_id
+        )
+        
+        logger.info(f"Уведомление отправлено автору {post.user_id}, состояние установлено.")
+
     except Exception as e:
         logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
 
     await message.answer(f"Новость #{post_id} возвращена автору.\nКомментарий: {comment}")
-
-    # Показываем панель администратора
-    await show_admin_panel(message, user_id)
+    await state.clear()
 
 
 # кнопка "настройки" для админа

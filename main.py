@@ -6,11 +6,12 @@ from aiogram.types import Message
 from aiogram.filters.command import Command
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 from dotenv import load_dotenv
 
 from app.student_handler import user_router
-from app.admin_handler import admin_router, init_admins
+from app.admin_handler import admin_router, init_admins, set_dispatcher
 from app.superadmin_handler import super_router
 
 load_dotenv()
@@ -26,6 +27,7 @@ dispatcher = Dispatcher()
 dispatcher.include_router(user_router)
 dispatcher.include_router(admin_router)
 dispatcher.include_router(super_router)
+set_dispatcher(dispatcher)
 
 @dispatcher.message(Command("id"))
 async def get_id(message: Message):
