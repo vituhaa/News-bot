@@ -1,7 +1,7 @@
 from aiogram import F, Router
 import asyncio
 from collections import defaultdict
-from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -275,8 +275,16 @@ async def edit_or_submit(message: Message, state: FSMContext):
     elif message.text == "Редактировать":
         data = await state.get_data()
         await state.clear()
+
+        await state.update_data(
+            topic=data.get("topic"),
+            text=data.get("text"),
+            category=data.get("category"),
+            photos=[],
+            document=None
+        )
+        
         # сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
-        await state.update_data(data)
         await message.answer("Редактируем... Начните с названия.", reply_markup=ReplyKeyboardRemove())
         await message.answer("Пункт 1. Название вашей новости (до 200 символов):")
         await state.set_state(Questions.topic)
@@ -438,4 +446,3 @@ async def edit_news(message: Message, state: FSMContext):
             "Используйте кнопки клавиатуры.",
             reply_markup=keyboards.edit_revision_button
             )
-        

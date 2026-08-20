@@ -142,10 +142,8 @@ class Storage:
     def get_stats(self) -> dict:
         stats = {
             'total': 0,
-            'draft': 0,
             'pending': 0,
             'revision': 0,
-            'approved': 0,
             'published': 0,
             'rejected': 0
         }

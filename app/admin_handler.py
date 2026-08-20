@@ -74,10 +74,8 @@ def init_admins(admins_ids):
 
 def format_post_text(post: Post) -> str:
     status_names = {
-        'draft': 'Черновик',
         'pending': 'На модерации',
         'revision': 'Требуется доработка',
-        'approved': 'Одобрено',
         'published': 'Опубликовано',
         'rejected': 'Отклонено'
     }
@@ -856,10 +854,8 @@ async def admin_stats(callback: CallbackQuery):
     stats = storage.get_stats()
     text = "Статистика постов:\n\n"
     text += f"Всего: {stats['total']}\n"
-    text += f"Черновики: {stats['draft']}\n"
     text += f"На модерации: {stats['pending']}\n"
     text += f"На доработке: {stats['revision']}\n"
-    text += f"Одобрено: {stats['approved']}\n"
     text += f"Опубликовано: {stats['published']}\n"
     text += f"Отклонено: {stats['rejected']}\n"
 

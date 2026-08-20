@@ -2,8 +2,7 @@ from datetime import datetime
 from typing import Optional, Literal, List
 
 # Типы статусов
-# PostStatus = Literal['pending', 'in_progress', 'published', 'rejected', 'returned', 'draft']
-PostStatus = Literal['pending', 'revision', 'published', 'rejected', 'draft', 'approved']
+PostStatus = Literal['pending', 'revision', 'published', 'rejected', 'draft']
 UserRole = Literal['superadmin', 'admin']
 
 # Модель новости
@@ -18,7 +17,7 @@ class Post:
         media_ids: Optional[List[str]] = None,
         media_types: Optional[List[str]] = None,
         media_names: Optional[List[str]] = None,
-        status: PostStatus = 'draft'
+        status: str = 'draft'
     ):
         self.id = None  # будет присвоен при сохранении
         self.user_id = user_id
