@@ -380,7 +380,7 @@ async def approve_post(callback: CallbackQuery):
                 for i, photo_id in enumerate(photos):
                     if i == 0:
                         album.append(InputMediaPhoto(
-                            media=photo_id["file_id"], 
+                            media=photo_id, 
                             caption=post_text,
                             parse_mode='HTML'))
                     else:
@@ -631,6 +631,8 @@ async def export_post(callback: CallbackQuery):
         await callback.answer("Пост не найден", show_alert=True)
         return
 
+    await callback.answer("Начинаю выгрузку...")
+
     zip_data = io.BytesIO()
     with zipfile.ZipFile(zip_data, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         data = post.to_dict()
@@ -653,25 +655,27 @@ async def export_post(callback: CallbackQuery):
 
 async def download_post(post, post_id):
     files_dict = {}
-    extentions = {
-        'photo': '.jpg', 
-        'photo': '.png',
-        'document': '.docx', 
-        'document': '.pdf'
-    }
     media_types = post.media_types
-    media_ids = [media['file_id'] for media in post.media_ids]
-    media_names = post.media_names or [f"file_{i + 1}" for i in range(len(media_ids))]
+    media_ids = [media['file_id'] if isinstance(media, dict) else media for media in post.media_ids]
+    media_names = post.media_names or []
 
-    for file_id, media_type, media_name in zip(media_ids, media_types, media_names):
+    for i, (file_id, media_type) in enumerate(zip(media_ids, media_types)):
         file_data = await download_file(file_id)
-        if file_data:
-            ext = extentions.get(media_type)
-            if media_name:
-                filename = media_name
-            else:
-                filename = f"{media_type}_{len(files_dict) + 1}{ext}"
-            files_dict[filename] = file_data
+        if not file_data:
+            continue
+        if i < len(media_names) and media_names[i]:
+            filename = media_names[i]
+
+        elif media_type == "photo":
+            filename = f"photo_{i + 1}.jpg"
+
+        elif media_type == "document":
+            filename = f"document_{i + 1}"
+
+        else:
+            filename = f"file_{i + 1}"
+
+        files_dict[filename] = file_data
 
     return files_dict
 
