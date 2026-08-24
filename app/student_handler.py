@@ -149,7 +149,6 @@ async def finish_photo_batch(message: Message, state:FSMContext, key):
         async with photo_lock[key]:
             data = await state.get_data()
             photos = data.get("photos", [])
-            # photos.sort(key=lambda x: x["message_id"])
             if len(photos) > 10:
                 photos = photos[:10]
                 await state.update_data(photos=photos)
@@ -213,7 +212,6 @@ async def files_done(message: Message, state: FSMContext):
     text = data.get('text', 'Не указано')
     category = data.get('category', 'Не указано')
 
-    # карточка для предпросмотра
     result = (
         "Ваша новость:\n"
         f"Название: {topic}\n"
@@ -225,7 +223,6 @@ async def files_done(message: Message, state: FSMContext):
 
     await message.answer(result)
 
-    # предпросмотр фотографий:
     if len(photos) == 1:
         await message.answer_photo(photo=photos[0]["file_id"])
     elif len(photos) > 1:
@@ -237,7 +234,6 @@ async def files_done(message: Message, state: FSMContext):
             media=builder.build()
         )
 
-    # предпросмотр документа:
     if document:
         await message.answer_document(document=document["file_id"])
     
@@ -250,8 +246,7 @@ async def files_done(message: Message, state: FSMContext):
 
 
 async def notify_admins_about_post(bot, post, is_update: bool = False):
-    #Отправляет уведомление всем администраторам о новом или обновлённом посте.
-    admins = storage.get_all_admins()
+    admins = await storage.get_all_admins()
     action = "Обновлена" if is_update else "Новая"
     for admin in admins:
         try:
@@ -284,7 +279,6 @@ async def edit_or_submit(message: Message, state: FSMContext):
             document=None
         )
         
-        # сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
         await message.answer("Редактируем... Начните с названия.", reply_markup=ReplyKeyboardRemove())
         await message.answer("Пункт 1. Название вашей новости (до 200 символов):")
         await state.set_state(Questions.topic)
@@ -297,7 +291,7 @@ async def edit_or_submit(message: Message, state: FSMContext):
         topic = data.get('topic')
         text = data.get('text')
         category = data.get('category')
-        edit_post_id = data.get('edit_post_id')  # если происходит редактирование, здесь будет ID поста
+        edit_post_id = data.get('edit_post_id')
 
         media_ids = []
         media_types = []
@@ -322,16 +316,14 @@ async def edit_or_submit(message: Message, state: FSMContext):
             await message.answer("Ошибка: необходимо прикрепить хотя бы одно медиа-вложение.")
             return
 
-        # Если имеется edit_post_id, то это редактирование существующего поста
         if edit_post_id:
-            post = storage.get_post(edit_post_id)
+            post = await storage.get_post(edit_post_id)
             if not post:
                 await message.answer("Ошибка: пост для редактирования не найден. Попробуйте заново /start")
                 await state.clear()
                 return
 
-            # Обновляем все поля и сбрасываем модерацию
-            success = storage.update_post(
+            success = await storage.update_post(
                 edit_post_id,
                 topic=topic,
                 text=text,
@@ -339,19 +331,19 @@ async def edit_or_submit(message: Message, state: FSMContext):
                 media_ids=media_ids,
                 media_types=media_types,
                 media_names=media_names,
-                status='pending',          # возвращаем на модерацию
+                status='pending',
                 taken_by=None,             
                 taken_at=None,
                 moderated_by=None,
                 moderated_at=None,
-                comment=None               # очищаем комментарий модератора
+                comment=None
             )
             if not success:
                 await message.answer("Ошибка при обновлении поста. Попробуйте заново.")
                 await state.clear()
                 return
 
-            saved_post = storage.get_post(edit_post_id)
+            saved_post = await storage.get_post(edit_post_id)
             if not saved_post:
                 await message.answer("Ошибка: не удалось получить обновлённый пост.")
                 await state.clear()
@@ -367,7 +359,6 @@ async def edit_or_submit(message: Message, state: FSMContext):
             )
 
         else:
-            # Создание нового поста
             post = Post(
                 user_id=message.from_user.id,
                 username=message.from_user.username or f"id_{message.from_user.id}",
@@ -379,7 +370,7 @@ async def edit_or_submit(message: Message, state: FSMContext):
                 media_names=media_names,
                 status="pending"
             )
-            saved_post = storage.create_post(post)
+            saved_post = await storage.create_post(post)
             await notify_admins_about_post(message.bot, saved_post, is_update=False)
 
             await state.set_state(UserState.make_another_news)
@@ -393,6 +384,7 @@ async def edit_or_submit(message: Message, state: FSMContext):
             "Используйте кнопки клавиатуры.",
             reply_markup=keyboards.edit_news_keyboard
         )
+
 
 @user_router.message(UserState.make_another_news)
 async def make_another_news_func(message: Message, state: FSMContext):
@@ -416,7 +408,6 @@ async def make_another_news_func(message: Message, state: FSMContext):
 @user_router.message(UserState.edit_revision_news)
 async def edit_news(message: Message, state: FSMContext):
     if message.text == "Изменить новость":
-        # возвращаемся к первому шагу с сохранёнными данными
         data = await state.get_data()
 
         post_id = data.get('pending_edit_post_id')
@@ -425,7 +416,6 @@ async def edit_news(message: Message, state: FSMContext):
         post_files = data.get('pending_edit_files', [])
         moderator_comment = data.get('pending_edit_comment')
 
-        # сохраняем старые данные в контекст, чтобы при повторном заполнении они не пропали
         await state.update_data(
             edit_post_id=post_id,
             edit_topic=post_topic,
@@ -445,4 +435,4 @@ async def edit_news(message: Message, state: FSMContext):
         await message.answer(
             "Используйте кнопки клавиатуры.",
             reply_markup=keyboards.edit_revision_button
-            )
+        )

@@ -50,29 +50,25 @@ class AdminState(StatesGroup):
     wait_for_user_id = State()
 
 # =========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===========
-def is_admin(user_id: int) -> bool:
-    admins = storage.get_all_admins()
-    admin_list = []
-    for admin in admins:
-        admin_list.append(int(admin.user_id))
-    if user_id in admin_list:
-        return True
-    else:
-        return False
+async def is_admin(user_id: int) -> bool:
+    admins = await storage.get_all_admins()
+    admin_list = [admin.user_id for admin in admins]
+    return user_id in admin_list
 
-def init_admins(admins_ids):
+async def init_admins(admins_ids):
     for admin_id in admins_ids:
         print(admin_id)
-        if not storage.get_admin(admin_id):
+        if not await storage.get_admin(admin_id):
             admin = Admin(
                 user_id=admin_id,
                 username=f"superadmin_{admin_id}",
                 role='superadmin',
                 added_by=admin_id
             )
-            storage.add_admin(admin)
+            await storage.add_admin(admin)
 
-def format_post_text(post: Post) -> str:
+def format_post_text(post: Post, taken_admin: Admin = None) -> str:
+    """Форматирует текст поста для отображения администратору."""
     status_names = {
         'pending': 'На модерации',
         'revision': 'Требуется доработка',
@@ -86,9 +82,8 @@ def format_post_text(post: Post) -> str:
     if post.category:
         text += f"Категория: {post.category}\n"
     text += f"Создано: {post.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-    if post.taken_by:
-        admin = storage.get_admin(post.taken_by)
-        admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
+    if post.taken_by and taken_admin:
+        admin_name = f"@{taken_admin.username}" if taken_admin else f"id{post.taken_by}"
         text += f"Взял на модерацию: {admin_name}\n"
     text += f"\nЗАГОЛОВОК:\n{post.topic}\n"
     text += f"\nТЕКСТ:\n{post.text}\n"
@@ -103,7 +98,7 @@ def format_post_text(post: Post) -> str:
 async def start_admin(message: Message):
     user_id = message.from_user.id
     
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await message.answer("У вас нет прав администратора.")
         return
     
@@ -111,13 +106,14 @@ async def start_admin(message: Message):
 
 
 async def show_admin_panel(message: Message, user_id: int):
-    pending_posts = storage.get_pending_count()
+    pending_posts = await storage.get_pending_count()
+    admins = await storage.get_all_admins()
+    channel_info = await storage.get_channel_info()
 
     text = f"Панель администратора\n\n"
     text += f"Новостей в очереди: {pending_posts}\n"
-    text += f"Всего администраторов: {len(storage.get_all_admins())}\n"
+    text += f"Всего администраторов: {len(admins)}\n"
 
-    channel_info = storage.get_channel_info()
     if channel_info['is_configured']:
         channel_display = channel_info.get('channel_username') or channel_info.get('channel_link')
         text += f"Канал: {channel_display}\n"
@@ -130,7 +126,12 @@ async def show_admin_panel(message: Message, user_id: int):
 
 
 async def show_post_to_admin(message: Message, post: Post, progress: str = "", show_next: bool = True):
-    text = format_post_text(post)
+    # Получаем администратора, взявшего пост (если есть)
+    taken_admin = None
+    if post.taken_by:
+        taken_admin = await storage.get_admin(post.taken_by)
+    
+    text = format_post_text(post, taken_admin)
     if progress:
         text = f"{progress}\n {text}"
     keyboard = keyboards.get_admin_post_keyboard(post.id, show_next=show_next)
@@ -186,11 +187,10 @@ async def show_post_to_admin(message: Message, post: Post, progress: str = "", s
             )
 
 
-# так как администраторы должны иметь возможность перейти к заявке по ID:
 @admin_router.message(Command("review"))
 async def review_post_by_id(message: Message):
     user_id = message.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await message.answer("У вас нет прав администратора.")
         return
 
@@ -205,7 +205,7 @@ async def review_post_by_id(message: Message):
         await message.answer("ID должен быть числом.")
         return
 
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await message.answer(f"Новость с ID {post_id} не найдена.")
         return
@@ -215,11 +215,11 @@ async def review_post_by_id(message: Message):
 
 @admin_router.callback_query(lambda c: c.data == "admin_inbox")
 async def admin_inbox(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
-    pending_posts = storage.get_pending_posts()
+    pending_posts = await storage.get_pending_posts()
     if not pending_posts:
         await callback.message.edit_text("Нет постов на модерацию.")
         await callback.answer()
@@ -233,11 +233,11 @@ async def admin_inbox(callback: CallbackQuery):
 @admin_router.callback_query(lambda c: c.data == "admin_next")
 async def admin_next(callback: CallbackQuery):
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
-    pending_posts = storage.get_pending_posts()
+    pending_posts = await storage.get_pending_posts()
     if not pending_posts:
         await callback.message.edit_text("Все новости обработаны!")
         await callback.answer()
@@ -257,26 +257,26 @@ async def admin_next(callback: CallbackQuery):
 @admin_router.callback_query(lambda c: c.data.startswith("approve_"))
 async def approve_post(callback: CallbackQuery):
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
     post_id = int(callback.data.split('_')[1])
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await callback.answer("Пост не найден", show_alert=True)
         return
 
     if post.taken_by and post.taken_by != user_id:
-        admin = storage.get_admin(post.taken_by)
+        admin = await storage.get_admin(post.taken_by)
         admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
         await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
         return
 
     if not post.taken_by:
-        storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
+        await storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
 
-    channel_info = storage.get_channel_info()
+    channel_info = await storage.get_channel_info()
     conf_info = channel_info["is_configured"]
 
     if conf_info:
@@ -317,7 +317,7 @@ async def approve_post(callback: CallbackQuery):
         try:
             chat = await bot.get_chat(username_with_at)
             chat_id = chat.id
-            storage.set_setting('channel_id', chat.id)
+            await storage.set_setting('channel_id', chat.id)
             
             await callback.answer(
                 f"Канал успешно подключен: {chat.title}",
@@ -328,7 +328,7 @@ async def approve_post(callback: CallbackQuery):
             try:
                 chat = await bot.get_chat(username)
                 chat_id = chat.id
-                storage.set_setting('channel_id', chat.id)
+                await storage.set_setting('channel_id', chat.id)
                 
                 await callback.answer(
                     f"Канал успешно подключен: {chat.title}",
@@ -364,7 +364,6 @@ async def approve_post(callback: CallbackQuery):
             else:
                 documents.append(media_id)
         if photos:
-            # photos = [photo["file_id"] for photo in photos]
             if len(photos) == 1:
                 sent = await bot.send_photo(
                     chat_id=chat_id,
@@ -400,7 +399,7 @@ async def approve_post(callback: CallbackQuery):
                 sent_list.append(sent)
 
         if sent_list:
-            storage.update_post(
+            await storage.update_post(
                 post_id,
                 status='published',
                 moderated_by=user_id,
@@ -409,7 +408,6 @@ async def approve_post(callback: CallbackQuery):
                 channel_post_url=sent_list[0].get_url()
             )
 
-        # Отсылаем уведомление студенту при публикации
         try:
             await bot.send_message(
                 post.user_id,
@@ -428,24 +426,24 @@ async def approve_post(callback: CallbackQuery):
 @admin_router.callback_query(lambda c: c.data.startswith("revision_"))
 async def revision_post(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
     post_id = int(callback.data.split('_')[1])
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await callback.answer("Пост не найден", show_alert=True)
         return
 
     if post.taken_by and post.taken_by != user_id:
-        admin = storage.get_admin(post.taken_by)
+        admin = await storage.get_admin(post.taken_by)
         admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
         await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
         return
 
     if not post.taken_by:
-        storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
+        await storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
 
     await state.update_data(post_id=post_id)
     await state.set_state(AdminState.wait_for_comment)
@@ -459,7 +457,7 @@ async def revision_post(callback: CallbackQuery, state: FSMContext):
 @admin_router.callback_query(lambda c: c.data.startswith("reject_") and not c.data.startswith("confirm_reject_") and not c.data.startswith("cancel_reject_"))
 async def reject_post(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
@@ -472,19 +470,19 @@ async def reject_post(callback: CallbackQuery, state: FSMContext):
         return
 
     post_id = int(parts[1])
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await callback.answer("Пост не найден", show_alert=True)
         return
 
     if post.taken_by and post.taken_by != user_id:
-        admin = storage.get_admin(post.taken_by)
+        admin = await storage.get_admin(post.taken_by)
         admin_name = f"@{admin.username}" if admin else f"id{post.taken_by}"
         await callback.answer(f"Пост уже взял {admin_name}", show_alert=True)
         return
 
     if not post.taken_by:
-        storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
+        await storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
 
     await callback.message.answer(
         f"Вы точно хотите отклонить пост #{post_id}?\n"
@@ -496,7 +494,7 @@ async def reject_post(callback: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminState.wait_for_reject_comment)
 async def process_reject_comment(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await message.answer("У вас нет прав администратора.")
         await state.clear()
         return
@@ -513,13 +511,13 @@ async def process_reject_comment(message: Message, state: FSMContext):
         await message.answer("Причина отклонения должна содержать минимум 10 символов. Напишите подробнее:")
         return
 
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await message.answer("Пост не найден")
         await state.clear()
         return
 
-    storage.update_post(
+    await storage.update_post(
         post_id,
         status='rejected',
         moderated_by=user_id,
@@ -527,7 +525,6 @@ async def process_reject_comment(message: Message, state: FSMContext):
         comment=comment
     )
 
-    # отсылаем уведомление автору поста при оотклонении
     try:
         await bot.send_message(
             post.user_id,
@@ -536,20 +533,17 @@ async def process_reject_comment(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
-    # 
 
     await message.answer(f"✅ Новость #{post_id} отклонена. Причина отправлена автору.")
 
-    # вызываем панель администратора (с удалением старой клавиатуры)
     await show_admin_panel(message, user_id)
-
     await state.clear()
 
 
 @admin_router.callback_query(lambda c: c.data.startswith("confirm_reject_"))
 async def confirm_rejecting_post(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
@@ -563,19 +557,18 @@ async def confirm_rejecting_post(callback: CallbackQuery, state: FSMContext):
 
     post_id = int(parts[2])
     
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await callback.answer("Пост не найден", show_alert=True)
         return
     
-    storage.update_post(
+    await storage.update_post(
         post_id,
         status='rejected',
         moderated_by=user_id,
         moderated_at=datetime.now()
     )
 
-    # Запоминаем ID поста, переключаемся на ввод комментария
     await state.update_data(post_id=post_id)
     await state.set_state(AdminState.wait_for_reject_comment)
 
@@ -588,7 +581,7 @@ async def confirm_rejecting_post(callback: CallbackQuery, state: FSMContext):
 @admin_router.callback_query(lambda c: c.data.startswith("cancel_reject_"))
 async def cancel_rejecting_post(callback: CallbackQuery):
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
@@ -601,7 +594,7 @@ async def cancel_rejecting_post(callback: CallbackQuery):
         return
 
     post_id = int(parts[2])
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await callback.answer("Пост не найден", show_alert=True)
         return
@@ -611,20 +604,18 @@ async def cancel_rejecting_post(callback: CallbackQuery):
         f"Пост возвращен на модерацию."
     )
     
-    # Показываем панель администратора
     await show_admin_panel(callback.message, user_id)
 
 
-# ЭКСПОРТ
 @admin_router.callback_query(lambda c: c.data.startswith("export_"))
 async def export_post(callback: CallbackQuery):
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
     post_id = int(callback.data.split('_')[1])
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await callback.answer("Пост не найден", show_alert=True)
         return
@@ -663,18 +654,13 @@ async def download_post(post, post_id):
             continue
         if i < len(media_names) and media_names[i]:
             filename = media_names[i]
-
         elif media_type == "photo":
             filename = f"photo_{i + 1}.jpg"
-
         elif media_type == "document":
             filename = f"document_{i + 1}"
-
         else:
             filename = f"file_{i + 1}"
-
         files_dict[filename] = file_data
-
     return files_dict
 
 
@@ -691,7 +677,7 @@ async def download_file(file_id):
 @admin_router.message(AdminState.wait_for_comment)
 async def process_comment(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await message.answer("У вас нет прав администратора.")
         await state.clear()
         return
@@ -704,20 +690,20 @@ async def process_comment(message: Message, state: FSMContext):
         await message.answer("Комментарий должен содержать минимум 10 символов. Напишите подробнее:")
         return
 
-    post = storage.get_post(post_id)
+    post = await storage.get_post(post_id)
     if not post:
         await message.answer("Пост не найден")
         await state.clear()
         return
     
-    storage.update_post(
+    await storage.update_post(
         post_id,
         status='revision',
         moderated_by=user_id,
         moderated_at=datetime.now(),
         comment=comment
     )
-    # Отсылаем уведомление студенту о возврате на доработку
+
     try:
         await bot.send_message(
             post.user_id,
@@ -736,9 +722,7 @@ async def process_comment(message: Message, state: FSMContext):
             pending_edit_post_id=post.id,
             pending_edit_topic=post.topic,
             pending_edit_text=post.text,
-            # pending_edit_files=[] if hasattr(post, 'files') else post.files,
             pending_edit_comment=comment,
-            # pending_edit_user_id=post.user_id
         )
         
         logger.info(f"Уведомление отправлено автору {post.user_id}, состояние установлено.")
@@ -750,10 +734,9 @@ async def process_comment(message: Message, state: FSMContext):
     await state.clear()
 
 
-# кнопка "настройки" для админа
 @admin_router.callback_query(lambda c: c.data == "admin_settings")
 async def admin_settings(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
@@ -764,10 +747,10 @@ async def admin_settings(callback: CallbackQuery):
     )
     await callback.answer()
 
-# кнопка установки канала
+
 @admin_router.callback_query(lambda c: c.data == "admin_set_channel")
 async def admin_set_channel(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("Только админ может настраивать канал.", show_alert=True)
         return
 
@@ -781,28 +764,28 @@ async def admin_set_channel(callback: CallbackQuery, state: FSMContext):
 
 @admin_router.message(AdminState.wait_for_channel)
 async def process_channel(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         await message.answer("У вас нет прав администратора.")
         await state.clear()
         return
 
     channel = message.text.strip()
     if channel.startswith('@'):
-        storage.set_setting('channel_username', channel)
-        storage.set_setting('channel_link', None)
+        await storage.set_setting('channel_username', channel)
+        await storage.set_setting('channel_link', None)
     elif channel.startswith('https://t.me/'):
-        storage.set_setting('channel_link', channel)
-        storage.set_setting('channel_username', None)
+        await storage.set_setting('channel_link', channel)
+        await storage.set_setting('channel_username', None)
 
     await message.answer(f"Канал установлен: {channel}", reply_markup=keyboards.back_to_admin)
     await state.clear()
 
-# кнопка "назад"
+
 @admin_router.callback_query(lambda c: c.data == "admin_back")
 async def admin_back(callback: CallbackQuery):
     user_id = callback.from_user.id
     
-    if not is_admin(user_id):
+    if not await is_admin(user_id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
     
@@ -812,7 +795,7 @@ async def admin_back(callback: CallbackQuery):
 
 @admin_router.callback_query(lambda c: c.data == "admin_manage")
 async def admin_manage(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
     
@@ -826,11 +809,11 @@ async def admin_manage(callback: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(lambda c: c.data == "admin_list")
 async def admin_list(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
     
-    admins = storage.get_all_admins()
+    admins = await storage.get_all_admins()
     
     if not admins:
         text = "Список администраторов пуст."
@@ -844,14 +827,13 @@ async def admin_list(callback: CallbackQuery):
     await callback.answer()
 
 
-# =========== СТАТИСТИКА ===========
 @admin_router.callback_query(lambda c: c.data == "admin_stats")
 async def admin_stats(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("У вас нет прав администратора.", show_alert=True)
         return
 
-    stats = storage.get_stats()
+    stats = await storage.get_stats()
     text = "Статистика постов:\n\n"
     text += f"Всего: {stats['total']}\n"
     text += f"На модерации: {stats['pending']}\n"

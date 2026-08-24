@@ -34,13 +34,14 @@ class AdminState(StatesGroup):
     wait_for_channel = State()
     wait_for_user_id = State()
 
-def is_superadmin(user_id: int) -> bool:
-    return storage.is_superadmin(user_id) or (str(user_id) in super_admins_list)
+async def is_superadmin(user_id: int) -> bool:
+    is_sa = await storage.is_superadmin(user_id)
+    return is_sa or (str(user_id) in super_admins_list)
 
 @super_router.message(Command("super"))
 async def start_super_admin(message: Message, state: FSMContext):
     user = message.from_user
-    if is_superadmin(user.id):
+    if await is_superadmin(user.id):
         await message.answer("Выберите действие", reply_markup=keyboards.super_admin_keyboard)
         await state.set_state(AdminState.wait_for_choice)
     else:
@@ -56,7 +57,7 @@ async def process_super_choice(message: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
     elif message.text == "Список текущих админов":
-        admins = storage.get_all_admins()
+        admins = await storage.get_all_admins()
         if not admins:
             text = "Список администраторов пуст."
         else:
@@ -65,7 +66,6 @@ async def process_super_choice(message: Message, state: FSMContext):
                 role = "Суперадмин" if admin.role == 'superadmin' else "Админ"
                 text += f"{i}. ID: {admin.user_id} - {role}\n"
         await message.answer(text, reply_markup=keyboards.super_admin_keyboard)
-        # await state.clear()
     elif message.text == "Удалить админа":
         await state.set_state(AdminState.delete_admin)
         await message.answer(
@@ -82,6 +82,7 @@ async def process_super_choice(message: Message, state: FSMContext):
             reply_markup=keyboards.super_admin_keyboard
         )
 
+
 @super_router.message(AdminState.delete_admin)
 async def process_delete_admin(message: Message, state: FSMContext):
     try:
@@ -90,7 +91,7 @@ async def process_delete_admin(message: Message, state: FSMContext):
         await message.answer("Неверный ввод! Введите числовой ID (например, 123456789):")
         return
     
-    if not storage.get_admin(delete_admin_id):
+    if not await storage.get_admin(delete_admin_id):
         await message.answer(
             "Этот пользователь не является администратором.",
             reply_markup=keyboards.super_admin_keyboard
@@ -98,7 +99,7 @@ async def process_delete_admin(message: Message, state: FSMContext):
         await state.set_state(AdminState.wait_for_choice)
         return
     
-    storage.remove_admin(delete_admin_id)
+    await storage.remove_admin(delete_admin_id)
     await message.answer(
         f"Администратор удалён: {delete_admin_id}",
         reply_markup=keyboards.super_admin_keyboard
@@ -114,7 +115,7 @@ async def process_new_admin(message: Message, state: FSMContext):
         await message.answer("Неверный ввод! Введите числовой ID (например, 123456789):")
         return
 
-    if storage.get_admin(new_admin_id):
+    if await storage.get_admin(new_admin_id):
         await message.answer(
             "Этот пользователь уже является администратором.",
             reply_markup=keyboards.super_admin_keyboard
@@ -128,7 +129,7 @@ async def process_new_admin(message: Message, state: FSMContext):
         role='admin',
         added_by=message.from_user.id
     )
-    storage.add_admin(admin)
+    await storage.add_admin(admin)
 
     await message.answer(
         f"Новый администратор добавлен: {new_admin_id}",

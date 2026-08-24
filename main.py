@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from app.student_handler import user_router
 from app.admin_handler import admin_router, init_admins, set_dispatcher
 from app.superadmin_handler import super_router
+from app.db import close_pool
 
 load_dotenv()
 
@@ -49,13 +50,14 @@ async def main():
         bot_info = await bot.get_me()
         print(f"Бот @{bot_info.username} подключён")
 
-        init_admins(super_admins_list)
+        await init_admins(super_admins_list)
 
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(bot)
 
     finally:
         await bot.session.close()
+        await close_pool()
 
 
 if __name__ == "__main__":
