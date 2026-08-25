@@ -79,9 +79,11 @@ class Storage:
     async def update_post(self, post_id: int, **kwargs) -> bool:
         pool = await get_pool()
         
-        for field in ['taken_at', 'moderated_at', 'created_at', 'updated_at']:
-            if field in kwargs and isinstance(kwargs[field], datetime):
-                kwargs[field] = kwargs[field].isoformat()
+        # for field in ['taken_at', 'moderated_at', 'created_at', 'updated_at']:
+        #     if field in kwargs and isinstance(kwargs[field], datetime):
+        #         kwargs[field] = kwargs[field].isoformat()
+
+        # print("DICT = ", kwargs)
         
         for field in ['media_ids', 'media_types', 'media_names']:
             if field in kwargs and kwargs[field] is not None:

@@ -6,7 +6,6 @@ from aiogram.types import Message
 from aiogram.filters.command import Command
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 from dotenv import load_dotenv
 

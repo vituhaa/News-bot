@@ -31,8 +31,8 @@ load_dotenv()
 admin_router = Router()
 logger = logging.getLogger(__name__)
 
-ADMINS = os.getenv("ADMINS", "")
-admins_list = [int(x.strip()) for x in ADMINS.split(",") if x.strip()]
+# ADMINS = os.getenv("ADMINS", "")
+# admins_list = [int(x.strip()) for x in ADMINS.split(",") if x.strip()]
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 PROXY_URL = os.getenv('PROXY_URL')
@@ -57,13 +57,13 @@ async def is_admin(user_id: int) -> bool:
 
 async def init_admins(admins_ids):
     for admin_id in admins_ids:
-        print(admin_id)
-        if not await storage.get_admin(admin_id):
+        print(type(admin_id))
+        if not await storage.get_admin(int(admin_id)):
             admin = Admin(
-                user_id=admin_id,
-                username=f"superadmin_{admin_id}",
+                user_id=int(admin_id),
+                username=f"superadmin_{int(admin_id)}",
                 role='superadmin',
-                added_by=admin_id
+                added_by=int(admin_id)
             )
             await storage.add_admin(admin)
 
@@ -294,6 +294,7 @@ async def approve_post(callback: CallbackQuery):
             )
 
         chat_id = channel_info.get("channel_link") or channel_info.get("channel_username")
+        print("FIRST CHAT ID = ", chat_id)
         value = chat_id.strip()
         if 't.me' in value or 'telegram.me' in value:
             match = re.search(r't\.me/([a-zA-Z0-9_]+)', value)
@@ -316,8 +317,9 @@ async def approve_post(callback: CallbackQuery):
 
         try:
             chat = await bot.get_chat(username_with_at)
-            chat_id = chat.id
-            await storage.set_setting('channel_id', chat.id)
+            chat_id = str(chat.id)
+            print("CHAT = ", chat_id)
+            await storage.set_setting('channel_id', chat_id)
             
             await callback.answer(
                 f"Канал успешно подключен: {chat.title}",
@@ -327,8 +329,8 @@ async def approve_post(callback: CallbackQuery):
         except Exception as e:
             try:
                 chat = await bot.get_chat(username)
-                chat_id = chat.id
-                await storage.set_setting('channel_id', chat.id)
+                chat_id = str(chat.id)
+                await storage.set_setting('channel_id', chat_id)
                 
                 await callback.answer(
                     f"Канал успешно подключен: {chat.title}",
@@ -344,6 +346,7 @@ async def approve_post(callback: CallbackQuery):
                     show_alert=True
                 )
                 return
+            #  await callback.answer(f"{e}")
 
         post_text = f"{post.topic} \n{post.text} \nКатегория:{post.category}"
 

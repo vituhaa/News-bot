@@ -8,7 +8,7 @@ DB_HOST = os.getenv('DB_HOST', 'localhost')
 DB_PORT = os.getenv('DB_PORT', '5432')
 DB_NAME = os.getenv('DB_NAME', 'news-bot')
 DB_USER = os.getenv('DB_USER', 'postgres')
-DB_PASSWORD = os.getenv('DB_PASSWORD', "SCRAM-SHA-256$4096:tV1ePqs++YTm0WwT61nbYw==$n8XEX+x9OfWrYWqeH3TJDWotFrYEH2l0ofiVFWKhPJ0=:Ul/Hki8IAg7GQsD+P69baocICEXx8R3vSWROkLlwRNE=")
+DB_PASSWORD = os.getenv('DB_PASSWORD', "")
 
 _pool = None
 
