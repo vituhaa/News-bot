@@ -1,12 +1,13 @@
 from aiogram import F, Router
 import asyncio
 from collections import defaultdict
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardRemove, KeyboardButton
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.media_group import MediaGroupBuilder
 from aiogram_media_group import media_group_handler
+from aiogram.types import Message, ReplyKeyboardRemove, KeyboardButton, ReplyKeyboardMarkup
 
 import app.keyboards as keyboards
 from app.storage import storage
@@ -83,9 +84,21 @@ async def type_tags(message: Message, state: FSMContext):
         return
     if message.content_type == "text":
         await state.update_data(text=message.text)
+        # Получаем категории из БД
+        categories = await storage.get_all_categories()
+        if not categories:
+            await message.answer("Категории ещё не созданы. Обратитесь к администратору.")
+            return
+        keyboard_buttons = [[KeyboardButton(text=cat)] for cat in categories]
+        keyboard_buttons.append([KeyboardButton(text="Отменить")])
+        category_keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
         await message.answer(
             "Пункт 3. Выберите категорию новости:",
-            reply_markup=keyboards.category_keyboard
+            reply_markup=category_keyboard
         )
         await state.set_state(Questions.tags)
     else:
@@ -100,11 +113,18 @@ async def choose_tags(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    allowed = ['Мероприятие', 'Стипендия', 'Спорт', 'Обучение']
-    if message.text not in allowed:
+    categories = await storage.get_all_categories()
+    if message.text not in categories:
+        keyboard_buttons = [[KeyboardButton(text=cat)] for cat in categories]
+        keyboard_buttons.append([KeyboardButton(text="Отменить")])
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
         await message.answer(
             "Пожалуйста, выберите категорию из предложенных кнопок:",
-            reply_markup=keyboards.category_keyboard
+            reply_markup=keyboard
         )
         return
     await state.update_data(category=message.text)

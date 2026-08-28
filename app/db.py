@@ -65,6 +65,12 @@ async def get_pool():
                     value TEXT
                 )
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS categories (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL
+                )
+            """)
     return _pool
 
 async def close_pool():

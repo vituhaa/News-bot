@@ -13,6 +13,7 @@ from app.student_handler import user_router
 from app.admin_handler import admin_router, init_admins, set_dispatcher
 from app.superadmin_handler import super_router
 from app.db import close_pool
+from app.storage import storage
 
 load_dotenv()
 
@@ -50,6 +51,7 @@ async def main():
         print(f"Бот @{bot_info.username} подключён")
 
         await init_admins(super_admins_list)
+        await storage.init_default_categories()
 
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(bot)

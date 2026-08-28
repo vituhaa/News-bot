@@ -1,5 +1,5 @@
 from aiogram import Router
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, BufferedInputFile, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, BufferedInputFile, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -31,9 +31,6 @@ load_dotenv()
 admin_router = Router()
 logger = logging.getLogger(__name__)
 
-# ADMINS = os.getenv("ADMINS", "")
-# admins_list = [int(x.strip()) for x in ADMINS.split(",") if x.strip()]
-
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 PROXY_URL = os.getenv('PROXY_URL')
 
@@ -48,6 +45,7 @@ class AdminState(StatesGroup):
     wait_for_reject_comment = State()
     wait_for_channel = State()
     wait_for_user_id = State()
+    wait_for_category_name = State()  # новое состояние
 
 # =========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===========
 async def is_admin(user_id: int) -> bool:
@@ -152,39 +150,20 @@ async def show_post_to_admin(message: Message, post: Post, progress: str = "", s
         else:
             documents.append(media_id)
 
+    # 1. Отправляем все фото (альбомом или по одному) без подписи и клавиатуры
     if photos:
         if len(photos) == 1:
-            await message.answer_photo(
-                photo=photos[0],
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
+            await message.answer_photo(photo=photos[0])
         else:
-            album = []
-            for i, photo_id in enumerate(photos):
-                if i == 0:
-                    album.append(InputMediaPhoto(
-                        media=photo_id, 
-                        caption=text,
-                        parse_mode='HTML'))
-                else:
-                    album.append(InputMediaPhoto(media=photo_id))
+            album = [InputMediaPhoto(media=photo_id) for photo_id in photos]
             await message.answer_media_group(media=album)
-            await message.answer("Действия с постом:", reply_markup=keyboard)
 
+    # 2. Отправляем все документы без подписи и клавиатуры
+    for doc_id in documents:
+        await message.answer_document(document=doc_id)
 
-    if documents:
-        for i, doc_id in enumerate(documents):
-            caption = text if not photos and i == 0 else None
-            reply_markup = keyboard if not photos and i == 0 else None
-            
-            await message.answer_document(
-                document=doc_id,
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode='HTML' if caption else None
-            )
+    # 3. Отправляем текст с клавиатурой отдельным сообщением
+    await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
 
 
 @admin_router.message(Command("review"))
@@ -277,95 +256,77 @@ async def approve_post(callback: CallbackQuery):
         await storage.update_post(post_id, taken_by=user_id, taken_at=datetime.now())
 
     channel_info = await storage.get_channel_info()
-    conf_info = channel_info["is_configured"]
+    if not channel_info["is_configured"]:
+        await callback.answer("Сначала укажите канал в настройках.", show_alert=True)
+        return
 
-    if conf_info:
-        text = f"Новость #{post_id} опубликована в канале!\nАвтор: @{post.username}"
+    # Получаем chat_id из настроек
+    chat_identifier = channel_info.get("channel_link") or channel_info.get("channel_username")
+    if not chat_identifier:
+        await callback.answer("Канал не настроен.", show_alert=True)
+        return
 
-        if callback.message.photo or callback.message.document:
-            await callback.message.edit_caption(
-                caption=text,
-                reply_markup=None
-            )
+    value = chat_identifier.strip()
+    if 't.me' in value or 'telegram.me' in value:
+        match = re.search(r't\.me/([a-zA-Z0-9_]+)', value)
+        if match:
+            username = match.group(1)
+            username_with_at = f"@{username}"
         else:
-            await callback.message.edit_text(
-                text=text,
-                reply_markup=None
-            )
-
-        chat_id = channel_info.get("channel_link") or channel_info.get("channel_username")
-        print("FIRST CHAT ID = ", chat_id)
-        value = chat_id.strip()
-        if 't.me' in value or 'telegram.me' in value:
-            match = re.search(r't\.me/([a-zA-Z0-9_]+)', value)
-            if match:
-                username = match.group(1)
-                username_with_at = f"@{username}"
-            else:
-                await callback.answer(
-                    "Не удалось распознать ссылку на канал. "
-                    "Используйте формат: https://t.me/newsbottest100",
-                    show_alert=True
-                )
-                return
-        elif value.startswith('@'):
-            username_with_at = value
-            username = value[1:]
-        else:
-            username = value
-            username_with_at = f"@{value}"
-
-        try:
-            chat = await bot.get_chat(username_with_at)
-            chat_id = str(chat.id)
-            print("CHAT = ", chat_id)
-            await storage.set_setting('channel_id', chat_id)
-            
             await callback.answer(
-                f"Канал успешно подключен: {chat.title}",
+                "Не удалось распознать ссылку на канал. "
+                "Используйте формат: https://t.me/newsbottest100",
                 show_alert=True
             )
-            
-        except Exception as e:
-            try:
-                chat = await bot.get_chat(username)
-                chat_id = str(chat.id)
-                await storage.set_setting('channel_id', chat_id)
-                
-                await callback.answer(
-                    f"Канал успешно подключен: {chat.title}",
-                    show_alert=True
-                )
-                
-            except Exception as e2:            
-                await callback.answer(
-                    "Не удалось найти канал. Проверьте:\n"
-                    "1. Правильность ссылки\n"
-                    "2. Бот является администратором\n"
-                    "3. Канал публичный",
-                    show_alert=True
-                )
-                return
-            #  await callback.answer(f"{e}")
+            return
+    elif value.startswith('@'):
+        username_with_at = value
+        username = value[1:]
+    else:
+        username = value
+        username_with_at = f"@{value}"
 
-        post_text = f"{post.topic} \n{post.text} \nКатегория:{post.category}"
+    try:
+        chat = await bot.get_chat(username_with_at)
+        chat_id = chat.id
+        await storage.set_setting('channel_id', str(chat_id))
+    except Exception as e:
+        try:
+            chat = await bot.get_chat(username)
+            chat_id = chat.id
+            await storage.set_setting('channel_id', str(chat_id))
+        except Exception as e2:
+            await callback.answer(
+                "Не удалось найти канал. Проверьте:\n"
+                "1. Правильность ссылки\n"
+                "2. Бот является администратором\n"
+                "3. Канал публичный",
+                show_alert=True
+            )
+            return
 
-        photos = []
-        documents = []
-        sent_list = []
+    # Формируем текст поста
+    post_text = f"{post.topic} \n{post.text} \nКатегория:{post.category}"
 
-        for i, media_id in enumerate(post.media_ids):
-            if i < len(post.media_types):
-                media_type = post.media_types[i]
-            else:
-                media_type = 'unknown'
-            
-            if media_type == 'photo':
-                photos.append(media_id["file_id"])
-            elif media_type == 'document':
-                documents.append(media_id)
-            else:
-                documents.append(media_id)
+    photos = []
+    documents = []
+    sent_list = []
+
+    for i, media_id in enumerate(post.media_ids):
+        if i < len(post.media_types):
+            media_type = post.media_types[i]
+        else:
+            media_type = 'unknown'
+        
+        if media_type == 'photo':
+            photos.append(media_id["file_id"])
+        elif media_type == 'document':
+            documents.append(media_id)
+        else:
+            documents.append(media_id)
+
+    # Отправляем в канал
+    try:
         if photos:
             if len(photos) == 1:
                 sent = await bot.send_photo(
@@ -385,14 +346,12 @@ async def approve_post(callback: CallbackQuery):
                             parse_mode='HTML'))
                     else:
                         album.append(InputMediaPhoto(media=photo_id))
-                sent = await bot.send_media_group(chat_id=chat_id,
-                                                media=album)
+                sent = await bot.send_media_group(chat_id=chat_id, media=album)
                 sent_list.extend(sent)
 
         if documents:
             for i, doc_id in enumerate(documents):
                 caption = post_text if not photos and i == 0 else None
-                
                 sent = await bot.send_document(
                     chat_id=chat_id,
                     document=doc_id,
@@ -401,30 +360,42 @@ async def approve_post(callback: CallbackQuery):
                 )
                 sent_list.append(sent)
 
-        if sent_list:
-            await storage.update_post(
-                post_id,
-                status='published',
-                moderated_by=user_id,
-                moderated_at=datetime.now(),
-                channel_message_id=sent_list[0].message_id,
-                channel_post_url=sent_list[0].get_url()
-            )
+        if not sent_list:
+            sent = await bot.send_message(chat_id=chat_id, text=post_text, parse_mode='HTML')
+            sent_list.append(sent)
 
-        try:
-            await bot.send_message(
-                post.user_id,
-                f"✅ Ваша новость опубликована! Смотреть: {sent_list[0].get_url()}"
-            )
-        except Exception as e:
-            logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
-
-        await show_admin_panel(callback.message, user_id)
-        await callback.answer("Новость одобрена!")
-    else:
-        await callback.answer("Сначала укажите канал в настройках.")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке в канал: {e}")
+        await callback.answer(f"Ошибка публикации: {e}", show_alert=True)
         return
-    
+
+    # Если дошли сюда – отправка успешна
+    await storage.update_post(
+        post_id,
+        status='published',
+        moderated_by=user_id,
+        moderated_at=datetime.now(),
+        channel_message_id=sent_list[0].message_id,
+        channel_post_url=sent_list[0].get_url() if hasattr(sent_list[0], 'get_url') else None
+    )
+
+    try:
+        await bot.send_message(
+            post.user_id,
+            f"✅ Ваша новость опубликована! Смотреть: {sent_list[0].get_url()}"
+        )
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление автору {post.user_id}: {e}")
+
+    success_text = f"Новость #{post_id} опубликована в канале!\nАвтор: @{post.username}"
+    if callback.message.photo or callback.message.document:
+        await callback.message.edit_caption(caption=success_text, reply_markup=None)
+    else:
+        await callback.message.edit_text(text=success_text, reply_markup=None)
+
+    await show_admin_panel(callback.message, user_id)
+    await callback.answer("Новость одобрена!")
+
 
 @admin_router.callback_query(lambda c: c.data.startswith("revision_"))
 async def revision_post(callback: CallbackQuery, state: FSMContext):
@@ -736,6 +707,95 @@ async def process_comment(message: Message, state: FSMContext):
     await message.answer(f"Новость #{post_id} возвращена автору.\nКомментарий: {comment}")
     await state.clear()
 
+
+# =========== УПРАВЛЕНИЕ КАТЕГОРИЯМИ ===========
+
+@admin_router.callback_query(lambda c: c.data == "admin_categories")
+async def admin_categories(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
+    categories = await storage.get_all_categories()
+    text = "Список категорий:\n" + "\n".join([f"• {cat}" for cat in categories]) if categories else "Категорий пока нет"
+    
+    keyboard_buttons = []
+    keyboard_buttons.append([InlineKeyboardButton(text="➕ Добавить", callback_data="add_category")])
+    for cat in categories:
+        keyboard_buttons.append([InlineKeyboardButton(text=f"❌ {cat}", callback_data=f"del_category_{cat}")])
+    keyboard_buttons.append([InlineKeyboardButton(text="Назад", callback_data="admin_back")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@admin_router.callback_query(lambda c: c.data == "add_category")
+async def add_category_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminState.wait_for_category_name)
+    await callback.message.edit_text("Введите название новой категории (или /cancel для отмены):")
+    await callback.answer()
+
+
+@admin_router.message(AdminState.wait_for_category_name)
+async def add_category_name(message: Message, state: FSMContext):
+    name = message.text.strip()
+    if name.lower() == "/cancel":
+        await state.clear()
+        await message.answer("Добавление отменено.", reply_markup=ReplyKeyboardRemove())
+        # Показываем список категорий
+        categories = await storage.get_all_categories()
+        text = "Список категорий:\n" + "\n".join([f"• {cat}" for cat in categories]) if categories else "Категорий пока нет"
+        keyboard_buttons = []
+        keyboard_buttons.append([InlineKeyboardButton(text="➕ Добавить", callback_data="add_category")])
+        for cat in categories:
+            keyboard_buttons.append([InlineKeyboardButton(text=f"❌ {cat}", callback_data=f"del_category_{cat}")])
+        keyboard_buttons.append([InlineKeyboardButton(text="Назад", callback_data="admin_back")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        await message.answer(text, reply_markup=keyboard)
+        return
+
+    success = await storage.add_category(name)
+    if success:
+        await message.answer(f"Категория «{name}» добавлена.")
+    else:
+        await message.answer(f"Категория «{name}» уже существует или ошибка.")
+    await state.clear()
+    # Обновляем список
+    categories = await storage.get_all_categories()
+    text = "Список категорий:\n" + "\n".join([f"• {cat}" for cat in categories]) if categories else "Категорий пока нет"
+    keyboard_buttons = []
+    keyboard_buttons.append([InlineKeyboardButton(text="➕ Добавить", callback_data="add_category")])
+    for cat in categories:
+        keyboard_buttons.append([InlineKeyboardButton(text=f"❌ {cat}", callback_data=f"del_category_{cat}")])
+    keyboard_buttons.append([InlineKeyboardButton(text="Назад", callback_data="admin_back")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await message.answer(text, reply_markup=keyboard)
+
+
+@admin_router.callback_query(lambda c: c.data.startswith("del_category_"))
+async def delete_category(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
+    name = callback.data.split("_", 2)[2]
+    success = await storage.delete_category(name)
+    if success:
+        await callback.answer(f"Категория «{name}» удалена.")
+    else:
+        await callback.answer("Не удалось удалить.", show_alert=True)
+    # Обновляем список
+    categories = await storage.get_all_categories()
+    text = "Список категорий:\n" + "\n".join([f"• {cat}" for cat in categories]) if categories else "Категорий пока нет"
+    keyboard_buttons = []
+    keyboard_buttons.append([InlineKeyboardButton(text="➕ Добавить", callback_data="add_category")])
+    for cat in categories:
+        keyboard_buttons.append([InlineKeyboardButton(text=f"❌ {cat}", callback_data=f"del_category_{cat}")])
+    keyboard_buttons.append([InlineKeyboardButton(text="Назад", callback_data="admin_back")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+# =========== НАСТРОЙКИ И ПРОЧЕЕ (без изменений) ===========
 
 @admin_router.callback_query(lambda c: c.data == "admin_settings")
 async def admin_settings(callback: CallbackQuery):

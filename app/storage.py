@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from typing import List, Optional, Dict
+import asyncpg
 
 from app.models import Post, Admin, PostStatus
 from app.db import get_pool
@@ -79,12 +80,6 @@ class Storage:
     async def update_post(self, post_id: int, **kwargs) -> bool:
         pool = await get_pool()
         
-        # for field in ['taken_at', 'moderated_at', 'created_at', 'updated_at']:
-        #     if field in kwargs and isinstance(kwargs[field], datetime):
-        #         kwargs[field] = kwargs[field].isoformat()
-
-        # print("DICT = ", kwargs)
-        
         for field in ['media_ids', 'media_types', 'media_names']:
             if field in kwargs and kwargs[field] is not None:
                 kwargs[field] = json.dumps(kwargs[field])
@@ -95,7 +90,7 @@ class Storage:
         query = f"UPDATE posts SET {set_clause} WHERE id = ${len(values)}"
         async with pool.acquire() as conn:
             result = await conn.execute(query, *values)
-            return result != "UPDATE 0"  # если затронуто 0 строк – false
+            return result != "UPDATE 0"
 
     async def delete_post(self, post_id: int) -> bool:
         pool = await get_pool()
@@ -201,6 +196,35 @@ class Storage:
                 'published': row['published'],
                 'rejected': row['rejected']
             }
+
+    # ==================== КАТЕГОРИИ ====================
+
+    async def get_all_categories(self) -> List[str]:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT name FROM categories ORDER BY name")
+            return [row['name'] for row in rows]
+
+    async def add_category(self, name: str) -> bool:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            try:
+                await conn.execute("INSERT INTO categories (name) VALUES ($1)", name)
+                return True
+            except asyncpg.UniqueViolationError:
+                return False
+
+    async def delete_category(self, name: str) -> bool:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM categories WHERE name = $1", name)
+            return result != "DELETE 0"
+
+    async def init_default_categories(self):
+        """Инициализирует категории по умолчанию, если их нет."""
+        defaults = ["Мероприятие", "Стипендия", "Спорт", "Обучение"]
+        for name in defaults:
+            await self.add_category(name)
 
     # ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
 
