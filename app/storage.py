@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 import asyncpg
 
@@ -103,6 +103,27 @@ class Storage:
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT COUNT(*) FROM posts WHERE status = 'pending'")
             return row['count']
+        
+    async def get_old_draft(self, days: int = 1) -> List[Post]:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            rows = await conn.fetch("""
+                SELECT * FROM posts 
+                WHERE status = 'draft' 
+                AND created_at < $1
+                ORDER BY created_at
+            """, cutoff_date)
+            return [self._row_to_post(row) for row in rows]
+        
+    async def delete_draft(self, user_id: int) -> bool:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM posts WHERE user_id = $1 AND status = 'draft'",
+                user_id
+            )
+        return result != "DELETE 0"
 
     # ==================== АДМИНИСТРАТОРЫ ====================
 

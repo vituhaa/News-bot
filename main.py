@@ -14,8 +14,10 @@ from app.admin_handler import admin_router, init_admins, set_dispatcher
 from app.superadmin_handler import super_router
 from app.db import close_pool
 from app.storage import storage
+import logging
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 PROXY_URL = os.getenv('PROXY_URL')
@@ -43,6 +45,22 @@ async def healthcheck(request: web.Request):
     return web.Response(text="Bot is alive!")
 
 
+async def reminder(bot: Bot):
+    while True:
+        try:
+            drafts = await storage.get_old_draft(days=1)
+            for post in drafts:
+                try:
+                    await bot.send_message(post.user_id,
+                                           "Вы не закончили новость. Продолжите заполнение? (команда /start)")
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.error(f"Не удалось отправить напоминание: {e}")
+        except Exception as e:
+            logger.error(f"Ошибка в функции: {e}")
+        await asyncio.sleep(86400)
+
+
 async def main():
     session = AiohttpSession(proxy=PROXY_URL)
     bot = Bot(token=BOT_TOKEN, session=session)
@@ -51,6 +69,7 @@ async def main():
         print(f"Бот @{bot_info.username} подключён")
 
         await init_admins(super_admins_list)
+        asyncio.create_task(reminder(bot))
         await storage.init_default_categories()
 
         await bot.delete_webhook(drop_pending_updates=True)

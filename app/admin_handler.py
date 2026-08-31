@@ -275,7 +275,7 @@ async def approve_post(callback: CallbackQuery):
         else:
             await callback.answer(
                 "Не удалось распознать ссылку на канал. "
-                "Используйте формат: https://t.me/newsbottest100",
+                "Используйте формат: https://t.me/newsbot_hse",
                 show_alert=True
             )
             return
@@ -306,7 +306,7 @@ async def approve_post(callback: CallbackQuery):
             return
 
     # Формируем текст поста
-    post_text = f"{post.topic} \n{post.text} \nКатегория:{post.category}"
+    post_text = f"{post.topic} \n{post.text} \nКатегория: {post.category}"
 
     photos = []
     documents = []
@@ -819,7 +819,7 @@ async def admin_set_channel(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(AdminState.wait_for_channel)
     await callback.message.edit_text(
-        "Установка канала.\n Введите ID канала (например, https://t.me/newsbottest100)\nили username канала (например, @newsbottest100):",
+        "Установка канала.\n Введите ID канала (например, https://t.me/newsbot_hse)\nили username канала (например, @newsbot_hse):",
         reply_markup=keyboards.back_to_admin
     )
     await callback.answer()

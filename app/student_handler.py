@@ -1,3 +1,4 @@
+from typing import Any, Dict
 from aiogram import F, Router
 import asyncio
 from collections import defaultdict
@@ -8,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.media_group import MediaGroupBuilder
 from aiogram_media_group import media_group_handler
 from aiogram.types import Message, ReplyKeyboardRemove, KeyboardButton, ReplyKeyboardMarkup
+from collections.abc import Callable, Awaitable
 
 import app.keyboards as keyboards
 from app.storage import storage
@@ -61,6 +63,7 @@ async def start_command(message: Message, state: FSMContext):
 @user_router.message(Questions.topic)
 async def type_text(message: Message, state: FSMContext):
     if message.text == "Отменить":
+        await storage.delete_draft(message.from_user.id)
         await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
         await state.clear()
         return
@@ -79,6 +82,7 @@ async def type_text(message: Message, state: FSMContext):
 @user_router.message(Questions.text)
 async def type_tags(message: Message, state: FSMContext):
     if message.text == "Отменить":
+        await storage.delete_draft(message.from_user.id)
         await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
         await state.clear()
         return
@@ -109,6 +113,7 @@ async def type_tags(message: Message, state: FSMContext):
 @user_router.message(Questions.tags)
 async def choose_tags(message: Message, state: FSMContext):
     if message.text == "Отменить":
+        await storage.delete_draft(message.from_user.id)
         await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
         await state.clear()
         return
@@ -217,6 +222,7 @@ async def files_album_handler(messages: list[Message], state: FSMContext):
 @user_router.message(F.text.in_({"Готово", "Отменить"}), StateFilter(Questions.files))
 async def files_done(message: Message, state: FSMContext):
     if message.text == "Отменить":
+        await storage.delete_draft(message.from_user.id)
         await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
         await state.clear()
         return
@@ -283,6 +289,7 @@ async def notify_admins_about_post(bot, post, is_update: bool = False):
 @user_router.message(UserState.wait_for_choice)
 async def edit_or_submit(message: Message, state: FSMContext):
     if message.text == "Отменить":
+        await storage.delete_draft(message.from_user.id)
         await message.answer("Создание новости отменено. Приходите снова, если захотите создать новость (команда /start)", reply_markup=ReplyKeyboardRemove())
         await state.clear()
         return
@@ -364,6 +371,7 @@ async def edit_or_submit(message: Message, state: FSMContext):
                 return
 
             saved_post = await storage.get_post(edit_post_id)
+            await storage.delete_draft(message.from_user.id)
             if not saved_post:
                 await message.answer("Ошибка: не удалось получить обновлённый пост.")
                 await state.clear()
@@ -391,6 +399,7 @@ async def edit_or_submit(message: Message, state: FSMContext):
                 status="pending"
             )
             saved_post = await storage.create_post(post)
+            await storage.delete_draft(message.from_user.id)
             await notify_admins_about_post(message.bot, saved_post, is_update=False)
 
             await state.set_state(UserState.make_another_news)
@@ -413,6 +422,7 @@ async def make_another_news_func(message: Message, state: FSMContext):
         await state.clear()
         await start_command(message, state)
     elif message.text == "Нет":
+        await storage.delete_draft(message.from_user.id)
         await state.clear()
         await message.answer(
             "Все новости отправлены. Приходите снова, если захотить создать новость (команда /start).",
@@ -456,3 +466,89 @@ async def edit_news(message: Message, state: FSMContext):
             "Используйте кнопки клавиатуры.",
             reply_markup=keyboards.edit_revision_button
         )
+
+async def save_draft_from_state(message: Message, state: FSMContext):
+    data = await state.get_data()
+    existing_drafts = await storage.get_all_posts(status='draft', user_id=message.from_user.id)
+    
+    if existing_drafts:
+        draft_id = existing_drafts[0].id
+        
+        photos = data.get("photos", [])
+        document = data.get("document")
+        
+        media_ids = []
+        media_types = []
+        media_names = []
+        
+        for photo in photos:
+            if isinstance(photo, dict):
+                media_ids.append(photo.get("file_id", ""))
+            else:
+                media_ids.append(photo)
+            media_types.append("photo")
+            media_names.append(None)
+        
+        if document:
+            if isinstance(document, dict):
+                media_ids.append(document.get("file_id", ""))
+            else:
+                media_ids.append(document)
+            media_types.append("document")
+            media_names.append(document.get("file_name", "document") if isinstance(document, dict) else "document")
+        
+        await storage.update_post(
+            draft_id,
+            topic=data.get("topic", ""),
+            text=data.get("text", ""),
+            category=data.get("category", ""),
+            media_ids=media_ids,
+            media_types=media_types,
+            media_names=media_names,
+            status='draft'
+        )
+    else:
+        draft = Post(
+            user_id=message.from_user.id,
+            username=message.from_user.username or f"id_{message.from_user.id}",
+            topic=data.get("topic", "Черновик"),
+            text=data.get("text", ""),
+            category=data.get("category", ""),
+            media_ids=[],
+            media_types=[],
+            media_names=[],
+            status='draft'
+        )
+        await storage.create_post(draft)
+
+
+@user_router.message.middleware()
+async def save_draft_middleware(
+    handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+    message: Message,
+    data: Dict[str, Any]
+):
+
+    await handler(message, data)
+    
+    state: FSMContext = data.get('state')
+    if not state:
+        return
+    
+    current_state = await state.get_state()
+    if (
+        current_state in [
+            Questions.topic.state,
+            Questions.text.state,
+            Questions.tags.state,
+            Questions.files.state
+        ]
+        and not message.text == "/start"
+        and not message.text == "/admin"
+    ):
+        try:
+            await save_draft_from_state(message, state)
+            logger.debug(f"Черновик сохранён для пользователя {message.from_user.id} (шаг: {current_state})")
+        except Exception as e:
+            logger.error(f"Ошибка сохранения черновика для {message.from_user.id}: {e}")
+
